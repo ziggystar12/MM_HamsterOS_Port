@@ -61,11 +61,16 @@ extern void speaker_note_on(uint16_t hz);
 extern void speaker_note_off(void);
 extern void sb16_stop(void);  /* called in close to stop any residual audio */
 
-/* Embedded binary data (generated from WALLPIX.DTA / MONPIX.DTA) */
+/* Embedded binary data (generated from Original_Source/) */
 extern const uint8_t  wallpix_dta_data[];
 extern const uint32_t wallpix_dta_size;
 extern const uint8_t  monpix_dta_data[];
 extern const uint32_t monpix_dta_size;
+extern const uint8_t  mazedata_dta_data[];
+extern const uint32_t mazedata_dta_size;
+extern const uint8_t  screen_dta_data[];
+extern const uint32_t screen_dta_offsets[10];
+extern const uint32_t screen_dta_sizes[10];
 extern void set_game_mode(bool g);
 
 /* ---- Music / SFX state (uses authentic MM1 sequences from mm_music.h) ---- */
@@ -145,7 +150,6 @@ static int          g_hunger_steps;
 /* Game data */
 static struct Map   g_maps[NUM_MAPS];
 static int          g_maps_loaded;
-static uint8_t     *g_mazedata_buf;
 static bool         g_wallpix_loaded;
 
 static GameState    g_gs;
@@ -158,8 +162,6 @@ static uint32_t     g_mm_cluster;
 
 /* Title */
 static int          g_title_idx;
-static uint8_t     *g_title_buf;
-static uint32_t     g_title_size;
 
 /* Monster sprites */
 static uint8_t     *g_monpix_buf;
@@ -202,15 +204,7 @@ static void mm_load_ovr_for_map(int map_idx)
 
 static void mm_load_title_screen(int idx)
 {
-    char fname[12];
-    fname[0]='S';fname[1]='C';fname[2]='R';fname[3]='E';fname[4]='E';fname[5]='N';
-    fname[6]=(char)('0'+idx);fname[7]='\0';
-    if(!g_title_buf) g_title_buf=(uint8_t*)heap_alloc(16384);
-    if(!g_title_buf) return;
-    uint32_t sz=0;bool trunc=false;
-    if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,fname,(char*)g_title_buf,16384,&sz,&trunc))
-        g_title_size=sz;
-    else g_title_size=0;
+    g_title_idx = idx;  /* screen data is embedded — no floppy read needed */
 }
 
 static void mm_load_game_data(void)
@@ -220,14 +214,7 @@ static void mm_load_game_data(void)
         serial_str("MM: no MM1/ on B:\n"); return;
     }
 
-    g_mazedata_buf=(uint8_t*)heap_alloc(28672);
-    if(!g_mazedata_buf){serial_str("MM: OOM\n");return;}
-    if(!fat_load_file(FAT_DRIVE_B,g_mm_cluster,"MAZEDATA.DTA",
-                      (char*)g_mazedata_buf,28672,&loaded_size,&trunc)){
-        serial_str("MM: no MAZEDATA\n");heap_free(g_mazedata_buf);g_mazedata_buf=NULL;return;
-    }
-    g_maps_loaded=mazedata_load(g_maps,g_mazedata_buf,loaded_size);
-    heap_free(g_mazedata_buf); g_mazedata_buf=NULL; /* no longer needed */
+    g_maps_loaded=mazedata_load(g_maps,mazedata_dta_data,mazedata_dta_size);
     serial_str("MM: maps=");serial_dec16((int16_t)g_maps_loaded);serial_str("\n");
 
     /* WALLPIX — embedded in app, no floppy read needed */
@@ -373,8 +360,6 @@ void mm_port_close(void){
     set_game_mode(false);
     sb16_stop(); speaker_note_off(); g_mus_seq=NULL; g_sfx_seq=NULL;
     wallpix_free(); monpix_free();
-    if(g_mazedata_buf){heap_free(g_mazedata_buf);g_mazedata_buf=NULL;}
-    if(g_title_buf){heap_free(g_title_buf);g_title_buf=NULL;}
     if(g_monpix_buf){heap_free(g_monpix_buf);g_monpix_buf=NULL;}
     g_maps_loaded=0;g_wallpix_loaded=false;g_monpix_loaded=false;
     g_game_ready=false;g_ovr_loaded=false;g_open=false;g_active=false;
@@ -391,12 +376,15 @@ void mm_port_bounds(int16_t *x,int16_t *y,int16_t *w,int16_t *h){
 /* ---- Screen decoders ---- */
 static void draw_title_screen(void){
     mm_memset(g_render_buf,0,sizeof(g_render_buf));
-    if(g_title_size>0){
-        /* Decode 320x200 and centre in 640x440 (double each pixel 2x2) */
-        static uint8_t scr_raw[16000];
-        extern int rle_decode_stream(const uint8_t*,int,int,uint8_t*,int,int);
-        mm_memset(scr_raw,0,sizeof(scr_raw));
-        rle_decode_stream(g_title_buf,(int)g_title_size,2,scr_raw,320,200);
+    {
+        int tidx=(g_title_idx>=0&&g_title_idx<10)?g_title_idx:0;
+        if(screen_dta_sizes[tidx]>0){
+            /* Decode 320x200 and centre in 640x440 (double each pixel 2x2) */
+            static uint8_t scr_raw[16000];
+            extern int rle_decode_stream(const uint8_t*,int,int,uint8_t*,int,int);
+            mm_memset(scr_raw,0,sizeof(scr_raw));
+            rle_decode_stream(screen_dta_data+screen_dta_offsets[tidx],
+                              (int)screen_dta_sizes[tidx],2,scr_raw,320,200);
         static const uint8_t PAL_NORMAL[4]={0,2,4,15};
         static const uint8_t PAL_SCREEN2[4]={0,3,5,15};
         const uint8_t *pal=(g_title_idx==2)?PAL_SCREEN2:PAL_NORMAL;
@@ -411,7 +399,8 @@ static void draw_title_screen(void){
             g_render_buf[(dy+1)*RENDER_W+dx]=c;
             g_render_buf[(dy+1)*RENDER_W+dx+1]=c;
         }
-    }
+        }  /* end if screen_dta_sizes */
+    }  /* end tidx block */
     font_print(g_render_buf,RENDER_W,"Press any key or click to continue",
                (RENDER_W-font_str_width("Press any key or click to continue",1))/2,
                428,15,1);
@@ -1232,7 +1221,6 @@ bool mm_port_update(void){
 /* ---- Title / town select helpers ---- */
 static void title_exit(void){
     speaker_note_off(); g_sfx_seq=NULL; g_mus_idx=0;
-    if(g_title_buf){heap_free(g_title_buf);g_title_buf=NULL;}
     g_title_idx=-1;
     g_town_cursor=0;  /* always start at 0 — Continue is always option 0 */
     g_mode=GM_TOWN_SELECT; g_needs_redraw=true;

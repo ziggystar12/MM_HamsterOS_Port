@@ -25,9 +25,12 @@ CFLAGS := -m32 -march=i386 -std=c11 -ffreestanding -fno-builtin \
           -Dmalloc=mm_malloc -Dfree=mm_free
 
 # ── Embedded binary data (generated from Original_Source/) ──
-# Baking WALLPIX + MONPIX eliminates floppy-load freezes at app open.
-WALLPIX_SRC := src/wallpix_data.c
-MONPIX_SRC  := src/monpix_data.c
+# Baking WALLPIX + MONPIX + MAZEDATA + SCREEN files eliminates all
+# floppy-load freezes. Only ROSTER.DTA and SAVESTAT.DAT stay on floppy.
+WALLPIX_SRC  := src/wallpix_data.c
+MONPIX_SRC   := src/monpix_data.c
+MAZEDATA_SRC := src/mazedata_data.c
+SCREEN_SRC   := src/screen_data.c
 
 $(WALLPIX_SRC): | $(BUILD_DIR)
 	@echo "Embedding WALLPIX.DTA..."
@@ -36,6 +39,14 @@ $(WALLPIX_SRC): | $(BUILD_DIR)
 $(MONPIX_SRC): | $(BUILD_DIR)
 	@echo "Embedding MONPIX.DTA..."
 	@python3 -c "d=open('$(MMDATA_DIR)/MONPIX.DTA','rb').read(); f=open('$@','w'); f.write('#include <stdint.h>\nconst uint8_t monpix_dta_data[]={'+','.join(str(b) for b in d)+'};\nconst uint32_t monpix_dta_size=%d;\n'%len(d))"
+
+$(MAZEDATA_SRC): | $(BUILD_DIR)
+	@echo "Embedding MAZEDATA.DTA..."
+	@python3 -c "d=open('$(MMDATA_DIR)/MAZEDATA.DTA','rb').read(); f=open('$@','w'); f.write('#include <stdint.h>\nconst uint8_t mazedata_dta_data[]={'+','.join(str(b) for b in d)+'};\nconst uint32_t mazedata_dta_size=%d;\n'%len(d))"
+
+$(SCREEN_SRC): | $(BUILD_DIR)
+	@echo "Embedding SCREEN0-9..."
+	@python3 -c "import os; D='$(MMDATA_DIR)'; fs=[open(os.path.join(D,'SCREEN%d'%i),'rb').read() if os.path.exists(os.path.join(D,'SCREEN%d'%i)) else b'' for i in range(10)]; raw=b''.join(fs); off=[sum(len(x) for x in fs[:i]) for i in range(10)]; f=open('$@','w'); f.write('#include <stdint.h>\nconst uint8_t screen_dta_data[]={'+(','.join(str(b) for b in raw) if raw else '0')+'};\nconst uint32_t screen_dta_offsets[10]={'+','.join(str(o) for o in off)+'};\nconst uint32_t screen_dta_sizes[10]={'+','.join(str(len(x)) for x in fs)+'};\n')"
 
 # Source files from this repo
 LOCAL_SRCS := \
@@ -68,7 +79,9 @@ GAME_SRCS := \
     src/monpix_port.c \
     src/mm_music.c \
     $(WALLPIX_SRC) \
-    $(MONPIX_SRC)
+    $(MONPIX_SRC) \
+    $(MAZEDATA_SRC) \
+    $(SCREEN_SRC)
 
 ALL_SRCS := $(LOCAL_SRCS) $(RENDER_SRCS) $(DATA_SRCS) $(GAME_SRCS)
 
@@ -105,4 +118,4 @@ MM.APP: $(ELF) | $(DIST_DIR)
 	@echo "MM.APP built: $(DIST_DIR)/MM.APP"
 
 clean:
-	rm -rf $(BUILD_DIR) $(DIST_DIR) $(WALLPIX_SRC) $(MONPIX_SRC)
+	rm -rf $(BUILD_DIR) $(DIST_DIR) $(WALLPIX_SRC) $(MONPIX_SRC) $(MAZEDATA_SRC) $(SCREEN_SRC)
