@@ -1,13 +1,13 @@
 # MM_HamsterOS_Port — Parity Roadmap
 
-**Build:** `code=124KB → packed=54KB` on disk, `BSS=561KB` at runtime. Compressed with zlib deflate level 9.
+**Build:** `code=425KB → packed=177KB` on disk, `BSS=561KB` at runtime. Compressed with zlib deflate level 9.
 
 ---
 
 ## Done
 
-- [x] Title sequence (SCREEN0-9, click/ESC skips to town select, music)
-- [x] Title music (TITLE.WAV via SB16, PC speaker fallback)
+- [x] Title sequence (SCREEN0-9 embedded; click/ESC skips to town select)
+- [x] Title music (PC speaker kMM1Sound0 sequence, loops)
 - [x] Wall rendering with correct per-wall EGA palette (TILE_COLORS)
 - [x] 3D corridor view (240x132 sub-buf at scale=2 → 480x264 on screen)
 - [x] Full-screen 640x440 layout at scale=1 (8px fonts)
@@ -26,15 +26,20 @@
 - [x] Outdoor area grid edge crossing (4x5 overworld)
 - [x] Scripted + random encounters (correct rates for towns vs dungeons vs outdoors)
 - [x] Combat engine (real MM1 formulas, A/B/C target group selection)
-- [x] S key in combat opens spell menu (Cleric/Sorcerer heals, damage, cure)
+- [x] Full spell system — all 49 spells dispatched (sleep, bless, raise dead, portal, food, escape/fly, protection, location, restore SP, levitate)
+- [x] Non-combat spells filtered from combat menu; bless tracked with per-round attack bonus
+- [x] Multiple monster sprites in combat (one per alive group, side-by-side layout)
+- [x] HP bars per monster group + sleep indicator (Zzz) in combat list
+- [x] Interactive combat item use (I key → backpack spell-items consumed)
+- [x] SFX: MM_STEP on movement, MM_HIT after combat round with hits landed
+- [x] SFX: MM_BUMP on wall, MM_VICTORY on win, MM_CHORD on level-up
 - [x] Loot after combat (items added to backpack, announced)
-- [x] Monster sprite in combat (MONPIX.DTA centred over 3D view)
 - [x] Level-up system (auto after combat, XP thresholds, HP/SP/END gains)
-- [x] Death handling ("YOUR PARTY HAS FALLEN", respawn at OVR safe coords)
+- [x] Death handling ("YOUR PARTY HAS FALLEN", respawn in current town or Sorpigal)
 - [x] Character sheet (1-6 keys: stats, equip, backpack, conditions, XP progress)
 - [x] Town select (6 options always shown; Continue greyed when no save)
 - [x] Inn (requires food, charges gold, restores HP+SP)
-- [x] Temple (cures all conditions, 100g)
+- [x] Temple (cures all non-eradicated conditions, flat 100g)
 - [x] Food shop (3 rations for 5g)
 - [x] Tavern (shows OVR rumour strings for current map)
 - [x] Training Hall (charges level x 1000g, applies level gains)
@@ -48,28 +53,48 @@
 - [x] Load saved game — Continue option updates within same session after save
 - [x] Search X, Bash B
 - [x] set_game_mode(true) — hides tray + header bar, suppresses all shell keys
-- [x] All game data in single B:/MM1/ folder
+- [x] All game data in single B:/MM1/ folder (blank-b.img)
 - [x] Starting food (10 rations on new game)
+- [x] MAZEDATA.DTA + SCREEN0-9 embedded in .APP (zero startup floppy reads for read-only data)
 
 ---
 
 ## Remaining
 
-- [ ] **Blacksmith sell from equipped** (sell directly from equipment slots)
-- [ ] **Game music in dungeons/overworld** (game.wav, dungeon.wav via SB16 — need files)
-- [ ] **Save slot select** (multiple named saves, choose on load)
-- [ ] **MM icon** (generate MM.ICO with mkicon.py, add to floppy)
-- [ ] **Add MM.APP to main HamsterOS floppy** (mkfreedosfloppy.py GAMES list)
-- [ ] **Charsheet sell from equipped** (sell equipped items directly)
+### Core Gameplay Gaps
+
+- [ ] **Character creation** — new party from scratch: dice-roll stats (3d6 + race/class bonus), pick class/race, accept/reroll loop; currently new game only loads existing ROSTER.DTA
+- [ ] **Tiered temple** — Cure Conditions (50g) / Raise Dead (500g, COND_DEAD→1HP) / Resurrect Eradicated (1000g, COND_ERADICATED→1HP); currently flat 100g cure-all that ignores eradicated
+- [ ] **Floor trap damage** — `handle_floor_trap()` is a TODO stub; poison gas / acid / stalactites / cold already parsed from OVR but no HP damage or conditions are applied
+- [ ] **Pit trap + Levitate bypass** — falls under floor trap stub; check `party.protections[PROT_LEVITATE] > 0` before applying fall damage
+- [ ] **Trapped chests** — detect chest trap from OVR, Robber disarm roll (thievery vs DC 14), deal trap damage to party on failure
+- [ ] **Bribe monsters** — offer gold (monster level × 10g) during combat; monsters flee on success (LCK roll); needs a new combat key (current B=Bash is explore-only)
+- [ ] **Tavern stat-boost drinks** — 5g per drink, rotating +1 to each stat in order (INT→MIG→PER→END→SPD→ACC→LCK, capped at 25); currently tavern only shows rumour text
+- [ ] **Shrine blessings** — SVC_SHRINE shows placeholder text; parse OVR for shrine type, apply effect (stat +1, gem award, cure condition, HP restore)
+- [ ] **Title cycling** — SCREEN0-9 embedded but `g_title_idx` never advances; add 4s timer in `mm_port_update` to cycle 0→9 then loop
+
+### Polish
+
+- [ ] **SFX: defeat lament** — silence on "YOUR PARTY HAS FALLEN"; add kMM1Sound defeat sequence to mm_music.c (mirror of MM_VICTORY, slower descending tones)
+- [ ] **SFX: inn rest chord** — silence when paying for inn; play MM_CHORD on successful rest
+- [ ] **Blacksmith sell from equipped** — sell directly from equipment slots (not just backpack)
+- [ ] **Charsheet sell from equipped** — sell equipped items directly from character sheet view
+- [ ] **Game music in dungeons/overworld** — game.wav / dungeon.wav via SB16 (need WAV source files)
+
+### Release
+
+- [ ] **Multiple save slots** — 3 named slots (SAVE1.DAT / SAVE2.DAT / SAVE3.DAT), slot picker on save and load
+- [ ] **MM icon** — generate MM.ICO with `../HamsterOS/tools/mkicon.py`, copy to blank-b.img alongside MM.APP
 
 ---
 
 ## Known Behaviour / Notes
 
-- **Floppy writes (P to save)** take 1–3 seconds — QEMU simulates real floppy timing. Batch mode is used to minimise seeks; expect a brief pause.
-- **Mouse cursor disappears** — HamsterOS redraws the backbuffer and re-composites the cursor each frame. During the ~5s floppy load (WALLPIX.DTA) the event loop is blocked, causing the cursor to vanish until load completes. Not fixable in MM.APP — it is an HamsterOS cooperative-multitasking limitation.
+- **Floppy writes (P to save)** take 1–3 seconds — QEMU simulates real floppy timing. Batch mode minimises seeks; expect a brief pause.
 - **OVR tavern rumours** quality varies by map — shows first string ≥12 chars from the OVR data.
 - **Characters start with 10 food rations** — buy more at food shops (5g = 3 rations).
+- **Floor traps** show OVR text but deal no damage yet (stub) — do not venture into pit areas without Levitate until implemented.
+- **Eradicated characters** (condition 0xFF) cannot be revived until tiered temple is implemented.
 
 ---
 
@@ -77,9 +102,22 @@
 
 ```powershell
 $p = "e:\OneDrive\Mean Hamster Group\New Mean Hamster"
+
 # Build
 docker compose -f "$p\HamsterOS\compose.yaml" run --rm -v "${p}:/parent" builder bash -c 'cd /parent/MM/MM_HamsterOS_Port && make all HAMSTEROS_DIR=/parent/HamsterOS MMDATA_DIR=/parent/MM/Original_Source 2>&1'
-# Deploy — copy to Compiled_Apps then rebuild hamster.img
-Copy-Item "$p\MM\MM_HamsterOS_Port\dist\MM.APP" "$p\HamsterOS\build\Compiled_Apps\MM.APP" -Force
-cd "$p\HamsterOS"; .\Make-hamster.bat
+
+# Deploy to game disk (blank-b.img) — MM.APP lives here alongside OVR/save files
+docker compose -f "$p\HamsterOS\compose.yaml" run --rm -v "${p}:/parent" builder bash -c 'mdel -i /work/build/blank-b.img ::MM1/MM.APP 2>/dev/null; mcopy -i /work/build/blank-b.img /parent/MM/MM_HamsterOS_Port/dist/MM.APP ::MM1/MM.APP'
 ```
+
+**Disk layout (`blank-b.img` = B: drive in QEMU):**
+
+```text
+B:/MM1/
+  MM.APP          ← game binary (177 KB packed)
+  *.OVR  ×55      ← area scripts (loaded per map change)
+  ROSTER.DTA      ← party data (read on open, written on save)
+  SAVESTAT.DAT    ← position save (written on P-save)
+```
+
+MM.APP is **not** in `HamsterOS/build/Compiled_Apps/` — it ships on the game disk, not baked into the OS floppy.
