@@ -1381,31 +1381,24 @@ bool mm_port_scancode(uint8_t sc){
     if(!g_open) return false;
     if(g_mode==GM_TITLE){title_exit();return true;}
 
-    /* Defeat screen — any key respawns at Sorpigal */
+    /* Defeat screen — any key respawns in current town (or Sorpigal if in dungeon/outdoors) */
     if(g_mode==GM_DEFEAT){
-        /* Respawn at Sorpigal using OVR safe coords */
-        g_gs.map_idx=0;
-        {
-            uint8_t *sbuf=(uint8_t*)heap_alloc(4096);
-            int sx=8,sy=3;
-            if(sbuf){
-                uint32_t ssz=0;bool st=false;
-                OvrFile sovr; mm_memset(&sovr,0,sizeof(sovr));
-                if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,"SORPIGAL.OVR",(char*)sbuf,4096,&ssz,&st))
-                    ovr_load_buf(&sovr,sbuf,ssz);
-                if(sovr.constants.safe_x>0) sx=sovr.constants.safe_x;
-                if(sovr.constants.safe_y>0) sy=sovr.constants.safe_y;
-                heap_free(sbuf);
-            }
-            player_init(&g_gs.player,sx,sy,0);
+        int sx=8, sy=3;
+        if(g_gs.map_idx>4){
+            g_gs.map_idx=0;  /* dungeon/outdoors → Sorpigal; sx/sy stay as defaults */
+        } else {
+            /* already in a town — use its loaded OVR safe coords */
+            if(g_ovr_loaded&&g_ovr.constants.safe_x>0) sx=g_ovr.constants.safe_x;
+            if(g_ovr_loaded&&g_ovr.constants.safe_y>0) sy=g_ovr.constants.safe_y;
         }
+        player_init(&g_gs.player,sx,sy,0);
         /* Revive all party members with 1 HP (mercy respawn) */
         {int i; for(i=0;i<g_gs.party.count;i++){
             Character *c=&g_gs.party.members[i];
             if(IS_DEADLIKE(c->condition)) c->condition=0;
             if(c->hp<=0) c->hp=1;
         }}
-        mm_load_ovr_for_map(0);
+        mm_load_ovr_for_map(g_gs.map_idx);
         g_mode=GM_EXPLORE; g_needs_redraw=true; return true;
     }
 
