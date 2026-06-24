@@ -4,6 +4,7 @@
 
 HAMSTEROS_DIR := ../HamsterOS
 MMCPORT_DIR   := ../MM_C_Port
+MMDATA_DIR    := /parent/MM/Original_Source
 
 CC  := gcc
 LD  := ld
@@ -20,25 +21,60 @@ CFLAGS := -m32 -march=i386 -std=c11 -ffreestanding -fno-builtin \
           -I$(HAMSTEROS_DIR)/apps \
           -I$(HAMSTEROS_DIR)/fs \
           -Isrc \
-          -Wall -Wextra -O2 \
+          -Wall -Wextra -Wno-unused-variable -Wno-missing-field-initializers -O2 \
           -Dmalloc=mm_malloc -Dfree=mm_free
+
+# ── Embedded binary data (generated from Original_Source/) ──
+# Baking WALLPIX + MONPIX eliminates floppy-load freezes at app open.
+WALLPIX_SRC := src/wallpix_data.c
+MONPIX_SRC  := src/monpix_data.c
+
+$(WALLPIX_SRC): | $(BUILD_DIR)
+	@echo "Embedding WALLPIX.DTA..."
+	@python3 -c "d=open('$(MMDATA_DIR)/WALLPIX.DTA','rb').read(); f=open('$@','w'); f.write('#include <stdint.h>\nconst uint8_t wallpix_dta_data[]={'+','.join(str(b) for b in d)+'};\nconst uint32_t wallpix_dta_size=%d;\n'%len(d))"
+
+$(MONPIX_SRC): | $(BUILD_DIR)
+	@echo "Embedding MONPIX.DTA..."
+	@python3 -c "d=open('$(MMDATA_DIR)/MONPIX.DTA','rb').read(); f=open('$@','w'); f.write('#include <stdint.h>\nconst uint8_t monpix_dta_data[]={'+','.join(str(b) for b in d)+'};\nconst uint32_t monpix_dta_size=%d;\n'%len(d))"
 
 # Source files from this repo
 LOCAL_SRCS := \
     src/mm_port.c \
     src/mm_stubs.c
 
-# Source files copied from MM_C_Port (add as you port each phase)
-# GAME_SRCS := \
-#     src/game.c \
-#     src/rle.c \
-#     src/font.c \
-#     src/mazedata.c \
-#     src/ovr.c
+# Phase 2: render support
+RENDER_SRCS := \
+    src/rle.c \
+    src/font.c
 
-ALL_SRCS := $(LOCAL_SRCS)
+# Phase 3: map data
+DATA_SRCS := \
+    src/mazedata.c
 
-OBJS := $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(ALL_SRCS))
+# Phase 4-5: game logic + rendering + music
+GAME_SRCS := \
+    src/game.c \
+    src/wallpix.c \
+    src/render3d.c \
+    src/hud_port.c \
+    src/roster_port.c \
+    src/items.c \
+    src/monsters.c \
+    src/spells.c \
+    src/ovr.c \
+    src/events_port.c \
+    src/combat_port.c \
+    src/screen_port.c \
+    src/monpix_port.c \
+    src/mm_music.c \
+    $(WALLPIX_SRC) \
+    $(MONPIX_SRC)
+
+ALL_SRCS := $(LOCAL_SRCS) $(RENDER_SRCS) $(DATA_SRCS) $(GAME_SRCS)
+
+# Object files — generated files go to build/
+OBJS := $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(filter src/%,$(ALL_SRCS)))
+
 # Entry point must be first in linker command
 ENTRY_OBJ := $(BUILD_DIR)/mm_entry.o
 
@@ -69,4 +105,4 @@ MM.APP: $(ELF) | $(DIST_DIR)
 	@echo "MM.APP built: $(DIST_DIR)/MM.APP"
 
 clean:
-	rm -rf $(BUILD_DIR) $(DIST_DIR)
+	rm -rf $(BUILD_DIR) $(DIST_DIR) $(WALLPIX_SRC) $(MONPIX_SRC)

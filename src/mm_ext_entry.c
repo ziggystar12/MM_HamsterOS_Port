@@ -1,7 +1,7 @@
 /* mm_ext_entry.c — HamsterOS app entry for MM_HamsterOS_Port
  * Shape is always the same; see ../HamsterOS/apps/piano_ext_entry.c */
 
-#include "../../../HamsterOS/kernel/app_abi.h"
+#include "app_abi.h"
 #include <stddef.h>
 
 void mm_stubs_set_host(HamsterHostAPI *h);

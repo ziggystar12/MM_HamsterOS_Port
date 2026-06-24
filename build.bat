@@ -12,7 +12,7 @@ if errorlevel 1 (
 )
 
 echo Building MM.APP...
-docker compose -f ..\HamsterOS\compose.yaml run --rm builder make -C /work/../MM_HamsterOS_Port MM.APP
+docker compose -f ..\HamsterOS\compose.yaml run --rm builder bash -c "cd /work/../MM/MM_HamsterOS_Port && make all HAMSTEROS_DIR=/work MMDATA_DIR=/work/../MM/Original_Source 2>&1"
 if errorlevel 0 (
     echo.
     echo Output: dist\MM.APP

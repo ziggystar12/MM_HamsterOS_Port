@@ -2,9 +2,8 @@
  * One thin wrapper per OS function used.
  * Reference: ../HamsterOS/apps/piano_stubs.c */
 
-#include "../../../HamsterOS/kernel/app_abi.h"
-#include "../../../HamsterOS/kernel/driver_loader.h"
-#include "../../../HamsterOS/fs/fat.h"
+#include "app_abi.h"
+#include "fat.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -78,10 +77,24 @@ void serial_str(const char *s)   { g_host->serial_str(s); }
 void serial_dec16(int16_t v)     { g_host->serial_dec16(v); }
 void serial_char(char c)         { g_host->serial_char(c); }
 
-/* SB16 audio driver (optional — check non-NULL before calling) */
-const DriverDescriptor *mm_find_audio_driver(void)
-    { return driver_loader_find_audio(); }
+/* FAT directory listing — used to find C:/DOS/MM/ cluster */
+bool mm_fat_list_dir(FatDrive drive, uint32_t dir, FatRootEntry *entries,
+                     uint32_t max, uint32_t start, uint32_t *count,
+                     bool *more, const char *ext_filter)
+    { return g_host->fat_list_dir(drive, dir, entries, max, start, count, more, ext_filter); }
 
 /* VGA geometry */
 int16_t vga_width(void)           { return g_host->vga_width(); }
 int16_t vga_height(void)          { return g_host->vga_height(); }
+
+/* Full game mode: hides tray, header bar, suppresses shell keys, disables screensaver */
+void set_game_mode(bool g) { g_host->set_game_mode(g); }
+
+/* SB16 audio */
+bool sb16_present(void)                              { return g_host->sb16_card_present(); }
+void sb16_play_wav(const uint8_t *wav, uint32_t sz)  { g_host->sb16_play_wav_buf(wav, sz); }
+void sb16_stop(void)                                 { g_host->sb16_audio_stop(); }
+
+/* FAT batch mode — groups writes to reduce floppy seek overhead */
+void fat_batch_begin(FatDrive d) { g_host->fat_begin_batch(d); }
+void fat_batch_end(FatDrive d)   { g_host->fat_end_batch(d); }
