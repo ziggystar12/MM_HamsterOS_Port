@@ -59,8 +59,12 @@ static int _is_blocked(const struct Map *map, int x, int y, int dir)
  * Each byte: lo nibble = color for 2bpp index 1, hi nibble = color for index 2.
  * Index 0 = transparent (0), index 3 = white (15). */
 static const uint8_t TILE_COLORS[18] = {
-    0xe6,0xe6,0xe6, 0x72,0x72,0x72, 0x62,0x62,0x62,
-    0x62,0x62,0xe1, 0x53,0x53,0xff, 0x43,0x43,0x63
+    0xe6,0xe6,0xe6, /* 0-2:  town stone (lo=brown/6, hi=yellow/14) */
+    0x72,0x72,0x72, /* 3-5:  dungeon stone (lo=green/2, hi=gray/7) */
+    0x62,0x62,0x62, /* 6-8:  outdoor trees near (lo=green/2, hi=brown/6) */
+    0x62,0x62,0x62, /* 9-11: outdoor trees mid (was 0xe1 blue/yellow) */
+    0x62,0x62,0xff, /* 12-14: outdoor trees far / special bright (12-13 were 0x53 cyan/magenta) */
+    0x43,0x43,0x63  /* 15-17: special/pyramid areas */
 };
 static uint8_t wall_pal(int wall_id, int idx) {
     if (wall_id < 0 || wall_id >= 18) wall_id = 0;

@@ -574,7 +574,7 @@ static void draw_combat_screen(void){
         font_print(g_render_buf,RENDER_W,g_combat.log[li],RENDER_W/2,54+i*9,7,1);
     }
 
-    /* Party HP */
+    /* Party HP — two columns of 3, right panel */
     for(i=0;i<g_gs.party.count&&i<6;i++){
         Character *c=&g_gs.party.members[i];
         char line[32]; int li=0;
@@ -585,7 +585,10 @@ static void draw_combat_screen(void){
         if(c->hp>=10)  line[li++]=(char)('0'+(c->hp/10)%10);
         line[li++]=(char)('0'+c->hp%10); line[li]='\0';
         uint8_t col=IS_DEADLIKE(c->condition)?8:(c->hp<=0?4:2);
-        font_print(g_render_buf,RENDER_W,line,RENDER_W/2+i*65,160,col,1);
+        /* Two columns of 3 in right panel (x=480+) */
+        int col_x = (i<3) ? RENDER_W/2 : RENDER_W/2+80;
+        int row_y = 160 + (i<3?i:i-3)*10;
+        font_print(g_render_buf,RENDER_W,line,col_x,row_y,col,1);
     }
 
     const char *prompt=g_combat.over?"ENTER to continue":
@@ -1417,9 +1420,8 @@ bool mm_port_update(void){
             g_mus_next = now + n->ms;
         }
     }
-    /* Auto-start music for title and gameplay */
-    if (g_music_en && !g_mus_seq &&
-        (g_mode==GM_TITLE||g_mode==GM_EXPLORE||g_mode==GM_COMBAT))
+    /* Auto-start music on title screen only */
+    if (g_music_en && !g_mus_seq && g_mode==GM_TITLE)
         music_start(MM_TITLE, MM_TITLE_LEN);
 
     if (g_mode == GM_TITLE) {
