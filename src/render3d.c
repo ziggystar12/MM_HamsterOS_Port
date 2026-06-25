@@ -59,11 +59,11 @@ static int _is_blocked(const struct Map *map, int x, int y, int dir)
  * Each byte: lo nibble = color for 2bpp index 1, hi nibble = color for index 2.
  * Index 0 = transparent (0), index 3 = white (15). */
 static const uint8_t TILE_COLORS[18] = {
-    0xe6,0xe6,0xe6, /* 0-2:  town stone (lo=brown/6, hi=yellow/14) */
-    0x72,0x72,0x72, /* 3-5:  dungeon stone (lo=green/2, hi=gray/7) */
-    0x62,0x62,0x62, /* 6-8:  outdoor trees near (lo=green/2, hi=brown/6) */
-    0x62,0x62,0x62, /* 9-11: outdoor trees mid (was 0xe1 blue/yellow) */
-    0x62,0x62,0xff, /* 12-14: outdoor trees far / special bright (12-13 were 0x53 cyan/magenta) */
+    0xe6,0xe6,0xe6, /* 0-2:  town stone     (lo=brown/6, hi=yellow/14) */
+    0x72,0x72,0x72, /* 3-5:  dungeon stone  (lo=green/2, hi=gray/7) */
+    0x06,0x02,0x06, /* 6=near rocky(brown), 7=tree(green), 8=near rocky(brown) */
+    0x02,0x02,0x02, /* 9-11: mid/far trees  (lo=green/2) */
+    0x02,0x02,0xff, /* 12-13: far trees (green); 14=pyramid bright */
     0x43,0x43,0x63  /* 15-17: special/pyramid areas */
 };
 static uint8_t wall_pal(int wall_id, int idx) {
@@ -135,24 +135,9 @@ static void _draw_background(uint8_t *buf, uint16_t stride, int ox, int oy, int 
 {
     int row, col;
     if (outdoor) {
-        /* Sky: dark blue -> cyan */
-        static const struct { int y0, y1; uint8_t c; } sky[] = {
-            {  0, 20, 1  },  /* EGA blue */
-            { 20, 40, 9  },  /* EGA bright blue */
-            { 40, 55, 11 },  /* EGA bright cyan */
-            { 55, 66, 3  },  /* EGA cyan */
-        };
-        static const struct { int y0, y1; uint8_t c; } gnd[] = {
-            { 66, 80, 6  },  /* EGA brown */
-            { 80,132, 2  },  /* EGA green */
-        };
-        int i;
-        for (i = 0; i < 4; i++)
-            for (row = sky[i].y0; row < sky[i].y1; row++)
-                mm_memset(buf + (oy+row)*stride + ox, sky[i].c, R3D_VW);
-        for (i = 0; i < 2; i++)
-            for (row = gnd[i].y0; row < gnd[i].y1; row++)
-                mm_memset(buf + (oy+row)*stride + ox, gnd[i].c, R3D_VW);
+        /* Black background — sprites provide all color (matches original MM1) */
+        for (row = 0; row < R3D_VH; row++)
+            mm_memset(buf + (oy+row)*stride + ox, 0, R3D_VW);
     } else {
         /* Dungeon: ceiling gradient + black floor */
         static const struct { int y0, y1; uint8_t c; } bands[] = {
