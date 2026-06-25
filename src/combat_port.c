@@ -183,6 +183,7 @@ static int party_attack(CombatSession *cs, Party *p, int map_idx) {
 
             if (mg->hp[mi]<=0) {
                 mg->hp[mi]=0; mg->alive--;
+                cs->n_hits_dealt += 10;  /* +10 signals a kill (≥10) vs plain hit */
                 xp += mg->type->xp;
                 cs->pending_gold += monster_roll(mg->type->level*5+1);
                 { char buf[40]; int bi=0;

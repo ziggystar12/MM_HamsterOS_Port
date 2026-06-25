@@ -168,12 +168,14 @@ static uint32_t     g_mm_cluster;
 static FatDrive     g_mm_drive = FAT_DRIVE_B;  /* drive where MM1/ was found */
 
 /* Called by the OS when the app is launched from a directory — gives us
- * the exact drive and cluster so we never need to search. */
+ * the exact drive and cluster so we never need to search.
+ * open_file_at IS the open handler for file-associated launches (open() is not called). */
 void mm_port_open_file_at(FatDrive drive, uint32_t cluster, const char *name)
 {
     (void)name;
     g_mm_drive   = drive;
     g_mm_cluster = cluster;
+    if(!g_open) mm_port_open();   /* full init — open() won't be called for file launches */
 }
 
 /* Title */
@@ -585,32 +587,35 @@ static void draw_combat_screen(void){
     uint16_t rr;
     for(rr=0;rr<RENDER_H;rr++) mm_memset(&g_render_buf[rr*RENDER_W],0,RENDER_W);
 
+    /* All combat text in right panel (x=481+) — never covered by 3D view */
+    int cx3=481;
+
     /* Combat header */
-    font_print(g_render_buf,RENDER_W,"=COMBAT=",2,2,15,1);
+    font_print(g_render_buf,RENDER_W,"=COMBAT=",cx3,2,14,1);
 
     /* Monster list with inline HP bars */
     for(g=0;g<g_combat.n_groups;g++){
         MonsterGroup *mg=&g_combat.groups[g];
-        char mline[40]; int ml=0;
+        char mline[32]; int ml=0;
         mline[ml++]=(char)('A'+g);mline[ml++]=':';mline[ml++]=' ';
-        const char *mn=mg->type->name; while(*mn&&ml<26) mline[ml++]=*mn++;
+        const char *mn=mg->type->name; while(*mn&&ml<22) mline[ml++]=*mn++;
         mline[ml++]=' ';mline[ml++]='x';
         if(mg->alive>=10) mline[ml++]=(char)('0'+mg->alive/10);
         mline[ml++]=(char)('0'+mg->alive%10);
-        if(mg->sleep_rounds>0){mline[ml++]='(';mline[ml++]='Z';mline[ml++]='z';mline[ml++]=')';}
+        if(mg->sleep_rounds>0){mline[ml++]='Z';mline[ml++]='z';}
         mline[ml]='\0';
         int gy=14+g*10;
-        font_print(g_render_buf,RENDER_W,mline,RENDER_W/2,gy,mg->alive>0?4:8,1);
-        /* HP bar: 40px wide, 4px tall, inline right of text */
+        font_print(g_render_buf,RENDER_W,mline,cx3,gy,mg->alive>0?4:8,1);
+        /* HP bar */
         if(mg->alive>0){
             int total_hp=mg->type->hp*mg->count;
             int cur_hp=0,k2; for(k2=0;k2<mg->type->max_group;k2++) if(mg->hp[k2]>0) cur_hp+=mg->hp[k2];
-            int bar_w=40;
+            int bar_w=30;
             int filled=total_hp>0?(cur_hp*bar_w)/total_hp:0;
-            int bx=RENDER_W/2+font_str_width(mline,1)+3;
+            int bx=cx3+font_str_width(mline,1)+2;
             uint8_t fcol=(uint8_t)(filled>bar_w*2/3?2:(filled>bar_w/3?14:4));
             int bri,bci;
-            for(bri=gy+1;bri<=gy+4;bri++)
+            for(bri=gy+1;bri<=gy+3;bri++)
                 for(bci=bx;bci<bx+bar_w&&bci<RENDER_W;bci++)
                     g_render_buf[bri*RENDER_W+bci]=(uint8_t)(bci-bx<filled?fcol:8);
         }
@@ -619,7 +624,7 @@ static void draw_combat_screen(void){
     /* Combat log */
     for(i=0;i<COMBAT_LOG_LINES&&i<g_combat.log_count;i++){
         int li=(g_combat.log_head-1-i+COMBAT_LOG_LINES)%COMBAT_LOG_LINES;
-        font_print(g_render_buf,RENDER_W,g_combat.log[li],RENDER_W/2,54+i*9,7,1);
+        font_print(g_render_buf,RENDER_W,g_combat.log[li],cx3,56+i*9,7,1);
     }
 
     /* Party HP — below the 3D view (y>264), three per row */
@@ -636,10 +641,10 @@ static void draw_combat_screen(void){
         font_print(g_render_buf,RENDER_W,line,(i%3)*(RENDER_W/3),272+(i/3)*10,col,1);
     }
 
-    const char *prompt=g_combat.over?"ENTER to continue":
-        (g_combat.bless_rounds>0?"[A]ttack [F]lee [S]pell [I]tem [G]bribe *BLESSED*":
+    const char *prompt=g_combat.over?"ENTER=continue":
+        (g_combat.bless_rounds>0?"[A]ttk [F]lee [S]pl [I]tem [G]bribe *BLS*":
                                   "[A]ttack [F]lee [S]pell [I]tem [G]bribe");
-    font_print(g_render_buf,RENDER_W,prompt,RENDER_W/2,174,14,1);
+    font_print(g_render_buf,RENDER_W,prompt,481,174,14,1);
 }
 
 /* ---- Town entry message on map change ---- */
@@ -1671,7 +1676,7 @@ static void do_combat_key(uint8_t sc){
     if(g_combat.over){
         if(sc==0x1C||sc==0x39||sc==0x3B){
             if(g_combat.result==CR_VICTORY){
-                sfx_play(MM_STEP,MM_STEP_LEN);   /* "ta-dah" on victory */
+                sfx_play(MM_VICTORY,MM_VICTORY_LEN);  /* victory fanfare */
                 combat_reward(&g_combat,&g_gs);
                 combat_loot(&g_combat,&g_gs);
                 if(g_combat.n_found_items>0){
@@ -1685,14 +1690,7 @@ static void do_combat_key(uint8_t sc){
                 check_level_ups();
             }
             if(g_combat.result==CR_DEFEAT) g_mode=GM_DEFEAT;
-            else {
-                g_mode=GM_EXPLORE;
-                /* Auto-search tile after victory */
-                if(g_gs.auto_search && g_ovr_loaded){
-                    const char *at=ovr_text_at(&g_ovr,g_gs.player.x,g_gs.player.y,g_gs.player.facing);
-                    handle_tile_event(&g_gs,&g_ovr,at);
-                }
-            }
+            else                           g_mode=GM_EXPLORE;
             g_needs_redraw=true;
         }
         return;
@@ -1704,7 +1702,8 @@ static void do_combat_key(uint8_t sc){
         else if(sc==0x2E&&g_combat.n_groups>2) tgt=2;
         g_combat.target_group=tgt;
         bool ended=combat_round_targeted(&g_combat,&g_gs,tgt);
-        if(g_combat.n_hits_dealt>0) sfx_play(MM_HIT,MM_HIT_LEN);
+        if(g_combat.n_hits_dealt>=10) sfx_play(MM_STEP,MM_STEP_LEN);  /* kill sound */
+        else if(g_combat.n_hits_dealt>0) sfx_play(MM_HIT,MM_HIT_LEN); /* hit sound */
         g_needs_redraw=true;
         if(ended&&g_combat.result==CR_DEFEAT){
             g_mode=GM_DEFEAT; sfx_play(MM_DEFEAT,MM_DEFEAT_LEN);
@@ -1799,6 +1798,9 @@ static void do_move(uint8_t sc){
         default: return;
     }
     if(!moved){ sfx_play(MM_BUMP,MM_BUMP_LEN); g_needs_redraw=true;return; }
+    /* step sound on forward/back/strafe (not on turns) */
+    if(sc==0x11||sc==0xC8||sc==0x1F||sc==0xD0||sc==0x20||sc==0x1E)
+        sfx_play(MM_STEP,MM_STEP_LEN);
 
     if(g_ovr_loaded){
         const char *ovr_txt=ovr_text_at(&g_ovr,g_gs.player.x,g_gs.player.y,g_gs.player.facing);
