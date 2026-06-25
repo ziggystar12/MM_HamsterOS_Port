@@ -38,7 +38,7 @@
 - [x] Death handling ("YOUR PARTY HAS FALLEN", respawn in current town or Sorpigal)
 - [x] Character sheet (1-6 keys: stats, equip, backpack, conditions, XP progress)
 - [x] Town select (6 options always shown; Continue greyed when no save)
-- [x] Inn (requires food, charges gold, restores HP+SP)
+- [x] Inn check-in flow (stores party at current town and returns to town roster select)
 - [x] Temple (cures all non-eradicated conditions, flat 100g)
 - [x] Food shop (3 rations for 5g)
 - [x] Tavern (shows OVR rumour strings for current map)
@@ -57,10 +57,13 @@
 - [x] Starting food (10 rations on new game)
 - [x] MAZEDATA.DTA + SCREEN0-9 embedded in .APP (zero startup floppy reads for read-only data)
 - [x] Character creation — dice-roll (race base + class bonus + 3d6), accept/reroll, N key on town select
+- [x] Character creation naming — typed 15-character names with default class/race fallback
 - [x] Tiered temple — Cure Conditions (50g) / Raise Dead (500g) / Resurrect Eradicated (1000g)
 - [x] Floor trap damage — pit (1d10, Levitate bypasses), poison gas, acid, stalactites
 - [x] Trapped chests — Robber disarm (level+d20 vs DC 14), 1d8 damage on fail
 - [x] Bribe monsters — G key in combat, LCK roll vs DC 12, costs monster_level×10g
+- [x] Combat balance pass — rotation no longer triggers encounters; OVR max monster level/quantity caps are honored
+- [x] Service parity pass — town-priced food, temple healing/cure/raise/resurrect, and training-driven level gains
 - [x] Tavern stat-boost drinks — 5g, rotating +1 to each stat in order (capped 25)
 - [x] Shrine blessings — OVR keyword detection: stat/gem/heal/cure effects applied
 - [x] Title cycling — SCREEN0-9 advance every 4 seconds
@@ -83,7 +86,8 @@ All planned features complete.
 
 - **Floppy writes (P to save)** take 1–3 seconds — QEMU simulates real floppy timing. Batch mode minimises seeks; expect a brief pause.
 - **OVR tavern rumours** quality varies by map — shows first string ≥12 chars from the OVR data.
-- **Characters start with 10 food rations** — buy more at food shops (5g = 3 rations).
+- **Characters start with 10 food rations** — food shops now sell town-priced blocks of 40 food.
+- **Level gains happen at training halls** after combat reports that a character is ready to train.
 
 ---
 

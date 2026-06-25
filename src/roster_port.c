@@ -52,6 +52,46 @@ static void parse_char(const uint8_t *r, Character *c, int slot)
     c->visit_flags = r[0x7B];
 }
 
+static void write_char(uint8_t *r, const Character *c)
+{
+    int s;
+    mm_memset(r, 0, CHAR_SIZE);
+    mm_memcpy(r, c->name, 15);
+    r[0x13] = (uint8_t)c->race;
+    r[0x14] = (uint8_t)c->cls;
+    for (s = 0; s < 7; s++) {
+        r[0x15 + s * 2]     = (uint8_t)c->stats[s];
+        r[0x15 + s * 2 + 1] = (uint8_t)c->stats_base[s];
+    }
+    r[0x23] = (uint8_t)c->level;
+    r[0x27] = (uint8_t)c->xp;
+    r[0x28] = (uint8_t)(c->xp >> 8);
+    r[0x29] = (uint8_t)(c->xp >> 16);
+    r[0x2A] = (uint8_t)(c->xp >> 24);
+    r[0x2B] = (uint8_t)c->sp;
+    r[0x2C] = (uint8_t)(c->sp >> 8);
+    r[0x2D] = (uint8_t)c->sp_max;
+    r[0x2E] = (uint8_t)(c->sp_max >> 8);
+    r[0x31] = (uint8_t)c->gems;
+    r[0x32] = (uint8_t)(c->gems >> 8);
+    r[0x33] = (uint8_t)c->hp;
+    r[0x34] = (uint8_t)(c->hp >> 8);
+    r[0x37] = (uint8_t)c->hp_max;
+    r[0x38] = (uint8_t)(c->hp_max >> 8);
+    r[0x39] = (uint8_t)c->gold;
+    r[0x3A] = (uint8_t)(c->gold >> 8);
+    r[0x3B] = (uint8_t)(c->gold >> 16);
+    r[0x3C] = (uint8_t)c->ac;
+    r[0x3E] = (uint8_t)c->food;
+    r[0x3F] = (uint8_t)c->condition;
+    for (s = 0; s < 6; s++) {
+        r[0x40 + s] = (uint8_t)c->equipped[s];
+        r[0x46 + s] = (uint8_t)c->backpack[s];
+    }
+    mm_memcpy(r + 0x70, c->char_quests, 8);
+    r[0x7B] = c->visit_flags;
+}
+
 int roster_load_buf(const uint8_t *data, uint32_t data_size, Party *party)
 {
     uint32_t expected = (uint32_t)MAX_CHARS * CHAR_SIZE + MAX_CHARS;
@@ -71,4 +111,41 @@ int roster_load_buf(const uint8_t *data, uint32_t data_size, Party *party)
         }
     }
     return n;
+}
+
+int roster_load_full_buf(const uint8_t *data, uint32_t data_size,
+                         Character chars[18], uint8_t exists_out[18])
+{
+    uint32_t expected = (uint32_t)MAX_CHARS * CHAR_SIZE + MAX_CHARS;
+    const uint8_t *exists;
+    int i, n = 0;
+
+    if (!data || data_size < expected || !chars || !exists_out) return -1;
+
+    exists = data + (uint32_t)MAX_CHARS * CHAR_SIZE;
+    for (i = 0; i < MAX_CHARS; i++) {
+        exists_out[i] = exists[i] ? 1 : 0;
+        if (exists_out[i]) {
+            parse_char(data + (uint32_t)i * CHAR_SIZE, &chars[i], i);
+            n++;
+        } else {
+            mm_memset(&chars[i], 0, sizeof(chars[i]));
+            chars[i].slot = i;
+        }
+    }
+    return n;
+}
+
+void roster_build_full_buf(uint8_t *raw,
+                           const Character chars[18], const uint8_t exists[18])
+{
+    int i;
+    if (!raw || !chars || !exists) return;
+    mm_memset(raw, 0, (uint32_t)MAX_CHARS * CHAR_SIZE + MAX_CHARS);
+    for (i = 0; i < MAX_CHARS; i++) {
+        if (exists[i]) {
+            write_char(raw + (uint32_t)i * CHAR_SIZE, &chars[i]);
+            raw[(uint32_t)MAX_CHARS * CHAR_SIZE + i] = 1;
+        }
+    }
 }

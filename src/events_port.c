@@ -20,7 +20,56 @@ const int TOWN_EXIT[NUM_TOWN_EXITS][2] = {
     { 0, 23 }, { 1, 30 }, { 2, 19 }, { 3, 18 }, { 4, 28 },
 };
 
-static int map_to_town_idx(int m) { return (m>=0&&m<=4) ? m : 0; }
+static int party_gold(const GameState *gs)
+{
+    int i, total = gs->party.shared_gold;
+    for(i=0;i<gs->party.count;i++) total += gs->party.members[i].gold;
+    return total;
+}
+
+static void party_spend(GameState *gs, int amount)
+{
+    int i;
+    if(amount<=0) return;
+    if(gs->party.shared_gold>0){
+        int take = gs->party.shared_gold < amount ? gs->party.shared_gold : amount;
+        gs->party.shared_gold -= take;
+        amount -= take;
+    }
+    for(i=0;i<gs->party.count && amount>0;i++){
+        int take = gs->party.members[i].gold < amount ? gs->party.members[i].gold : amount;
+        gs->party.members[i].gold -= take;
+        amount -= take;
+    }
+}
+
+static int count_bad_conditions(uint8_t cond)
+{
+    int n=0;
+    if(IS_DEADLIKE(cond)) return 0;
+    if(cond & COND_ASLEEP) n++;
+    if(cond & COND_BLINDED) n++;
+    if(cond & COND_SILENCED) n++;
+    if(cond & COND_DISEASED) n++;
+    if(cond & COND_POISONED) n++;
+    if(cond & COND_PARALYZED) n++;
+    if(cond & COND_UNCONSCIOUS) n++;
+    return n;
+}
+
+static int sp_gain_for_level(const Character *c, int next_level)
+{
+    int cls=c->cls, sp_stat=0, sp_factor;
+    if(cls==4||cls==2) sp_stat=c->stats_base[2];      /* Cleric/Paladin: PER */
+    else if(cls==5||cls==3) sp_stat=c->stats_base[0]; /* Sorcerer/Archer: INT */
+    else return 0;
+    if((cls==2||cls==3)&&next_level<7) return 0;
+    sp_factor=(sp_stat>=40)?10:(sp_stat>=35)?9:(sp_stat>=30)?8:(sp_stat>=25)?7:
+              (sp_stat>=20)?6:(sp_stat>=16)?5:(sp_stat>=13)?4:(sp_stat>=10)?3:
+              (sp_stat>=7)?2:(sp_stat>=5)?1:0;
+    return sp_factor;
+}
+
 static const char* map_to_name(int m) {
     const char* n = map_ovr_name(m);
     return (n && *n) ? n : "sorpigal";
@@ -40,6 +89,44 @@ static const ManualTileEvent MANUAL_TILE_EVENTS[] = {
     { "udrag1", 15, 15, 0, SVC_MESSAGE, "A SIGN ON THE DOOR READS: THE WALL IS PAINTED FROM CEILING TO FLOOR IN A BLACK AND WHITE CHECKERED PATTERN!" },
 #include "tiles_all.inc"
 };
+
+static char s_display_text[512];
+
+static int incomplete_header_text(const char* text)
+{
+    int len;
+    if (!text || !*text) return 0;
+    len = (int)strlen(text);
+    if (len <= 0) return 0;
+    return (strcasestr(text, "A SIGN ABOVE THE DOOR READS:") ||
+            strcasestr(text, "A SIGN ON THE DOOR READS:")) &&
+           text[len - 1] == ':';
+}
+
+static int quoted_sign_body(const char* text)
+{
+    if (!text || !*text) return 0;
+    return text[0] == '"';
+}
+
+static const char* display_text_for_event(ServiceType svc, const char* text)
+{
+    if (!text || !*text) return NULL;
+
+    if (svc == SVC_MESSAGE && quoted_sign_body(text)) {
+        mm_strncpy(s_display_text, "A SIGN ABOVE THE DOOR READS:\n", sizeof(s_display_text));
+        {
+            int pos = (int)strlen(s_display_text);
+            int i = 0;
+            while (text[i] && pos < (int)sizeof(s_display_text) - 1)
+                s_display_text[pos++] = text[i++];
+            s_display_text[pos] = '\0';
+        }
+        return s_display_text;
+    }
+
+    return text;
+}
 
 static ServiceType manual_tile_service(int map_idx, int x, int y, int facing,
                                         const char** out_text)
@@ -133,13 +220,17 @@ ServiceType peek_tile_event(const GameState* gs, const char* ovr_text,
                                           &manual_text);
     const char* text = (svc!=SVC_NONE && manual_text && *manual_text)
                      ? manual_text : ovr_text;
+    if (incomplete_header_text(text)) {
+        if (out_text) *out_text = "";
+        return SVC_NONE;
+    }
     if (svc == SVC_NONE) {
         if (!text || !*text) return SVC_NONE;
         svc = detect_service(text);
         if (gs->map_idx >= 0 && gs->map_idx <= 4 && is_town_service(svc))
             return SVC_NONE;
     }
-    if (out_text) *out_text = (text && *text) ? text : NULL;
+    if (out_text) *out_text = display_text_for_event(svc, text);
     return svc;
 }
 
@@ -211,81 +302,68 @@ int handle_tile_event(GameState *gs, const OvrFile *ovr, const char *ovr_text)
         break;
     }
     case SVC_INN: {
-        int cost = 10 * (gs->party.count > 0 ? gs->party.count : 1);
-        int i;
-        if (gs->party.shared_food <= 0) {
-            player_set_message(&gs->player, "NO FOOD! CANNOT REST HERE.", 120);
-            break;
-        }
-        if(gs->party.count>0 && (int)gs->party.members[0].gold >= cost){
-            gs->party.members[0].gold -= (uint32_t)cost;
-            gs->party.shared_food--;
-            for (i=0; i<gs->party.count; i++) {
-                Character *c = &gs->party.members[i];
-                if (!IS_DEADLIKE(c->condition)) {
-                    c->hp = c->hp_max; c->sp = c->sp_max;
-                    /* Clear recoverable rest-conditions */
-                    c->condition &= (uint8_t)(~(COND_ASLEEP | COND_UNCONSCIOUS));
-                }
-            }
-            /* Decrement timed protections */
-            { int j; for(j=0;j<18;j++) if(gs->party.protections[j]>0) gs->party.protections[j]--; }
-            player_set_message(&gs->player, "RESTED. HP/SP RESTORED.", 120);
-        } else {
-            player_set_message(&gs->player, "NOT ENOUGH GOLD TO REST.", 120);
-        }
+        player_set_message(&gs->player, "INN_CHECKIN", 1);
         break;
     }
     case SVC_TEMPLE: {
-        int i, has_erad=0, has_dead=0, has_cond=0;
+        static const int TOWN_RESURRECT_COST[5] = { 500, 1000, 800, 600, 1200 };
+        static const int TOWN_RAISE_COST[5]     = { 200,  400, 300, 250,  500 };
+        static const int TOWN_CURE_COST[5]      = {  50,  100,  75,  60,  120 };
+        static const int TOWN_MINOR_COST[5]     = {  10,   20,  15,  12,   25 };
+        int town = (gs->map_idx>=0&&gs->map_idx<=4) ? gs->map_idx : 0;
+        int i, resurrect_cost=0, raise_cost=0, cure_cost=0, heal_cost=0, wounded=0;
         for(i=0;i<gs->party.count;i++){
             uint8_t cd=(uint8_t)gs->party.members[i].condition;
-            if(cd==0xFF) has_erad=1;
-            else if(cd==0xC0||cd==0xA0) has_dead=1;
-            else if(cd!=0) has_cond=1;
+            if(cd==COND_ERADICATED) resurrect_cost += TOWN_RESURRECT_COST[town];
+            else if(cd==COND_DEAD||cd==COND_STONED) raise_cost += TOWN_RAISE_COST[town];
+            cure_cost += count_bad_conditions(cd) * TOWN_CURE_COST[town];
+            if(!IS_DEADLIKE(cd) && gs->party.members[i].hp < gs->party.members[i].hp_max){
+                wounded=1;
+                heal_cost += TOWN_MINOR_COST[town];
+            }
         }
-        int cost = has_erad ? 1000 : (has_dead ? 500 : 50);
-        if(!has_erad && !has_dead && !has_cond){
+        if(heal_cost==0 && wounded) heal_cost=TOWN_MINOR_COST[town];
+        int cost = resurrect_cost ? resurrect_cost : (raise_cost ? raise_cost :
+                   (cure_cost ? cure_cost : (wounded ? heal_cost : 0)));
+        if(cost<=0){
             player_set_message(&gs->player,"PARTY IS IN GOOD HEALTH.",90); break;
         }
-        if(gs->party.count>0 && (int)gs->party.members[0].gold >= cost){
-            gs->party.members[0].gold -= (uint32_t)cost;
+        if(party_gold(gs) >= cost){
+            party_spend(gs,cost);
             for(i=0;i<gs->party.count;i++){
                 Character *c2=&gs->party.members[i];
-                if(has_erad){
-                    if(c2->condition==0xFF){c2->condition=0;if(c2->hp<=0)c2->hp=1;}
-                } else if(has_dead){
-                    if(c2->condition==0xC0||c2->condition==0xA0){c2->condition=0;if(c2->hp<=0)c2->hp=1;}
+                if(resurrect_cost){
+                    if(c2->condition==COND_ERADICATED){c2->condition=0;if(c2->hp<=0)c2->hp=1;}
+                } else if(raise_cost){
+                    if(c2->condition==COND_DEAD||c2->condition==COND_STONED){c2->condition=0;if(c2->hp<=0)c2->hp=1;}
+                } else if(cure_cost){
+                    if(!IS_DEADLIKE(c2->condition)) c2->condition=0;
                 } else {
-                    if(c2->condition!=0xFF&&c2->condition!=0xC0&&c2->condition!=0xA0)
-                        c2->condition=0;
+                    if(!IS_DEADLIKE(c2->condition)) c2->hp=c2->hp_max;
                 }
             }
-            const char *msg = has_erad?"ERADICATED RESURRECTED! (1000g)":
-                              (has_dead?"DEAD RAISED! (500g)":"CONDITIONS CURED. (50g)");
+            const char *msg = resurrect_cost?"ERADICATED RESURRECTED!":
+                              (raise_cost?"DEAD RAISED!":
+                               (cure_cost?"CONDITIONS CURED.":"WOUNDS HEALED."));
             player_set_message(&gs->player,msg,120);
         } else {
-            /* Build "NEED Xg FOR TEMPLE." without snprintf */
-            char nmsg[40]; int ni=0;
-            const char *np="NEED "; while(*np) nmsg[ni++]=(char)*np++;
-            int cv=cost;
-            if(cv>=1000){nmsg[ni++]=(char)('0'+cv/1000);cv%=1000;}
-            if(cv>=100){nmsg[ni++]=(char)('0'+cv/100);cv%=100;}
-            if(cv>=10){nmsg[ni++]=(char)('0'+cv/10);cv%=10;}
-            nmsg[ni++]=(char)('0'+cv);
-            const char *ns="g FOR TEMPLE."; while(*ns) nmsg[ni++]=(char)*ns++;
-            nmsg[ni]='\0';
+            char nmsg[48];
+            mm_snprintf(nmsg,sizeof(nmsg),"NEED %d GOLD FOR TEMPLE.",cost);
             player_set_message(&gs->player,nmsg,120);
         }
         break;
     }
     case SVC_FOOD: {
-        int cost = 10;
-        if (gs->party.count > 0 && (int)gs->party.members[0].gold >= cost) {
-            gs->party.members[0].gold -= (uint32_t)cost;
-            gs->party.shared_food += 10;
-            if (gs->party.shared_food > 99) gs->party.shared_food = 99;
-            player_set_message(&gs->player, "10 RATIONS PURCHASED.", 120);
+        static const int FOOD_PRICE[5] = { 5, 8, 8, 10, 10 };
+        int town = (gs->map_idx>=0&&gs->map_idx<=4) ? gs->map_idx : 0;
+        int cost = FOOD_PRICE[town], qty = 40;
+        if (party_gold(gs) >= cost) {
+            char msg[48];
+            party_spend(gs,cost);
+            gs->party.shared_food += qty;
+            if (gs->party.shared_food > 999) gs->party.shared_food = 999;
+            mm_snprintf(msg,sizeof(msg),"%d FOOD PURCHASED FOR %d GOLD.",qty,cost);
+            player_set_message(&gs->player, msg, 120);
         } else {
             player_set_message(&gs->player, "NOT ENOUGH GOLD FOR FOOD.", 120);
         }
@@ -301,20 +379,40 @@ int handle_tile_event(GameState *gs, const OvrFile *ovr, const char *ovr_text)
             {2500,5000,10000,20000,40000,80000,160000,320000,640000,1280000},
             {1000,2000,4000,8000,16000,32000,64000,128000,256000,512000}
         };
-        int i, trained=0;
+        static const int HP_PER_LEVEL[7] = {0,12,10,8,8,6,8};
+        int i, trainable[MAX_PARTY], n_trainable=0, total_cost=0;
         for (i=0;i<gs->party.count;i++) {
             Character *c=&gs->party.members[i];
             if (IS_DEADLIKE(c->condition)||c->level>=10) continue;
             int cls=c->cls; if(cls<1||cls>6) continue;
             int needed=XP_T[cls-1][c->level-1];
             if (c->xp < needed) continue;
-            int cost=(c->level)*1000;
-            if ((int)gs->party.members[0].gold < cost) continue;
-            gs->party.members[0].gold -= (uint32_t)cost;
-            trained++;
+            trainable[n_trainable++]=i;
+            total_cost += c->level * 1000;
         }
-        if (trained>0) player_set_message(&gs->player,"TRAINING COMPLETE! Level gains applied.",120);
-        else            player_set_message(&gs->player,"NO CHARACTERS READY FOR TRAINING.",120);
+        if(n_trainable<=0){
+            player_set_message(&gs->player,"NO CHARACTERS READY FOR TRAINING.",120);
+        } else if(party_gold(gs) < total_cost){
+            char msg[48];
+            mm_snprintf(msg,sizeof(msg),"NEED %d GOLD FOR TRAINING.",total_cost);
+            player_set_message(&gs->player,msg,120);
+        } else {
+            char msg[48];
+            party_spend(gs,total_cost);
+            for(i=0;i<n_trainable;i++){
+                Character *c=&gs->party.members[trainable[i]];
+                int next_level=c->level+1;
+                c->level=next_level;
+                c->hp_max += HP_PER_LEVEL[c->cls];
+                c->hp = c->hp_max;
+                c->sp_max += sp_gain_for_level(c,next_level);
+                c->sp = c->sp_max;
+                c->stats_base[3]++;
+                c->stats[3]=c->stats_base[3]+c->equip_bonus[3];
+            }
+            mm_snprintf(msg,sizeof(msg),"%d MEMBER(S) ADVANCED!",n_trainable);
+            player_set_message(&gs->player,msg,120);
+        }
         break;
     }
     case SVC_BLACKSMITH:

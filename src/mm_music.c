@@ -1,5 +1,6 @@
 #include "mm_music.h"
 
+/* Tempo: ms per duration-tick. 55ms matches the original PC speaker pacing. */
 #define P(t,d) {(d)?(uint16_t)(1193182u/(d)):0u,(uint16_t)((t)*55u)}
 
 /* kMM1Sound0 — title theme (83 entries, loops) */

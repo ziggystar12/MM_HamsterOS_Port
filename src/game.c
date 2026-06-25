@@ -47,8 +47,8 @@ static int try_move(Player* p, const Map* m, int dx, int dy, int wall_dir)
     if (can_pass(m, p->x, p->y, wall_dir)) {
         p->x += dx;
         p->y += dy;
-        /* Clamp to valid range — out-of-bounds steps on outdoor maps
-         * are handled by area_edge_transition in the game loop. */
+        /* Generic movement clamps to the current map. The HamsterOS UI path
+         * handles outdoor edge transitions before using these helpers. */
         if (p->x < 0) p->x = 0;
         if (p->x >= MAP_SIZE) p->x = MAP_SIZE - 1;
         if (p->y < 0) p->y = 0;

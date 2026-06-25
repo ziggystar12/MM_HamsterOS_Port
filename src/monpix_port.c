@@ -72,7 +72,7 @@ bool monpix_decode(int id, uint8_t *out_buf)
 
 void monpix_blit(const uint8_t *spr, int monster_id,
                  uint8_t *buf, uint16_t stride,
-                 int dest_x, int dest_y)
+                 int buf_w, int buf_h, int dest_x, int dest_y)
 {
     uint16_t pw = MONPIX_PAL[monster_id >= 0 && monster_id < MONPIX_NUM_MONSTERS
                               ? monster_id : 0];
@@ -93,7 +93,7 @@ void monpix_blit(const uint8_t *spr, int monster_id,
                 if (!pal[idx]) continue;   /* transparent */
                 int px = dest_x + b*4 + p;
                 int py = dest_y + row;
-                if (px >= 0 && py >= 0 && px < RENDER_W && py < RENDER_H)
+                if (px >= 0 && py >= 0 && px < buf_w && py < buf_h)
                     buf[py * stride + px] = pal[idx];
             }
         }

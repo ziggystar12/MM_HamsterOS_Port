@@ -61,9 +61,9 @@ static int _is_blocked(const struct Map *map, int x, int y, int dir)
 static const uint8_t TILE_COLORS[18] = {
     0xe6,0xe6,0xe6, /* 0-2:  town stone     (lo=brown/6, hi=yellow/14) */
     0x72,0x72,0x72, /* 3-5:  dungeon stone  (lo=green/2, hi=gray/7) */
-    0x06,0x02,0x06, /* 6=near rocky(brown), 7=tree(green), 8=near rocky(brown) */
-    0x02,0x02,0x02, /* 9-11: mid/far trees  (lo=green/2) */
-    0x02,0x02,0xff, /* 12-13: far trees (green); 14=pyramid bright */
+    0x62,0x62,0x62, /* 6-8:  outdoor rocky/trees */
+    0x62,0x62,0xe1, /* 9-11: outdoor mid/far + water/special */
+    0x53,0x53,0xff, /* 12-13: outdoor special; 14=pyramid bright */
     0x43,0x43,0x63  /* 15-17: special/pyramid areas */
 };
 static uint8_t wall_pal(int wall_id, int idx) {
@@ -135,9 +135,21 @@ static void _draw_background(uint8_t *buf, uint16_t stride, int ox, int oy, int 
 {
     int row, col;
     if (outdoor) {
-        /* Black background — sprites provide all color (matches original MM1) */
-        for (row = 0; row < R3D_VH; row++)
-            mm_memset(buf + (oy+row)*stride + ox, 0, R3D_VW);
+        static const struct { int y0, y1; uint8_t c; } bands[] = {
+            {  0, 10, 1 },  /* dark blue sky */
+            { 10, 24, 1 },
+            { 24, 40, 9 },
+            { 40, 55, 3 },
+            { 55, 66,11 },  /* cyan horizon */
+            { 66, 80, 6 },  /* brown-green ground */
+            { 80, 96, 2 },
+            { 96,116, 2 },
+            {116,132, 0 },
+        };
+        int i;
+        for (i = 0; i < 9; i++)
+            for (row = bands[i].y0; row < bands[i].y1; row++)
+                mm_memset(buf + (oy+row)*stride + ox, bands[i].c, R3D_VW);
     } else {
         /* Dungeon: ceiling gradient + black floor */
         static const struct { int y0, y1; uint8_t c; } bands[] = {

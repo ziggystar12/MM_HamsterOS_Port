@@ -235,11 +235,20 @@ void encounter_generate(int max_level, int max_qty, MonsterGroup *out, int *out_
     for (int i = 0; i < NUM_MONSTERS; i++)
         if (s_monsters[i].level <= max_level && s_monsters[i].level > 0) pool[n++] = i;
     if (n == 0) { *out_count = 0; return; }
-    const MonsterType *mt = &s_monsters[pool[_rng(0, n-1)]];
-    int cnt = _rng(1, mt->max_group < max_qty ? mt->max_group : max_qty);
-    if (cnt < 1) cnt = 1;
-    if (cnt > MAX_MONSTER_GROUP) cnt = MAX_MONSTER_GROUP;
-    out->type = mt; out->count = cnt; out->alive = cnt; out->sleep_rounds = 0;
-    for (int i = 0; i < cnt; i++) out->hp[i] = mt->hp > 0 ? mt->hp : 1;
-    *out_count = 1;
+    int groups = (max_level >= 5) ? _rng(1, 4) : _rng(1, 2);
+    if (groups > 4) groups = 4;
+    for (int g = 0; g < groups; g++) {
+        const MonsterType *mt = &s_monsters[pool[_rng(0, n-1)]];
+        int limit = mt->max_group < max_qty ? mt->max_group : max_qty;
+        int cnt = _rng(1, limit > 0 ? limit : 1);
+        if (cnt < 1) cnt = 1;
+        if (cnt > MAX_MONSTER_GROUP) cnt = MAX_MONSTER_GROUP;
+        out[g].type = mt;
+        out[g].count = cnt;
+        out[g].alive = cnt;
+        out[g].sleep_rounds = 0;
+        for (int i = 0; i < MAX_MONSTER_GROUP; i++)
+            out[g].hp[i] = (i < cnt) ? (mt->hp > 0 ? mt->hp : 1) : 0;
+    }
+    *out_count = groups;
 }

@@ -25,7 +25,7 @@ bool monpix_decode(int monster_id, uint8_t *out_buf);
  * stride = render buffer row stride. Color 0 = transparent. */
 void monpix_blit(const uint8_t *sprite_2bpp, int monster_id,
                  uint8_t *buf, uint16_t stride,
-                 int dest_x, int dest_y);
+                 int buf_w, int buf_h, int dest_x, int dest_y);
 
 /* Free the raw data buffer. */
 void monpix_free(void);

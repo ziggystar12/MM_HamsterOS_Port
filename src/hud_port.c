@@ -25,9 +25,7 @@
 #define V_H  264
 
 /* Right panel split */
-#define RP_X 481
 #define RP_Y   0
-#define RP_W 159
 #define RP_H 284
 
 /* Minimap */
@@ -37,24 +35,12 @@
 #define MM_H 108
 
 /* Command buttons (3×3 grid) */
-#define CB_X (RP_X)
-#define CB_Y (MM_H+1)
-#define CB_W (RP_W)
-#define CB_H 113
 #define CB_COLS 3
 #define CB_ROWS 3
-#define CB_BW  (CB_W/CB_COLS)     /* ~53 px */
-#define CB_BH  (CB_H/CB_ROWS)     /* ~37 px */
 
 /* Move buttons (3×2 grid) */
-#define MB_X (RP_X)
-#define MB_Y (CB_Y+CB_H+1)
-#define MB_W (RP_W)
-#define MB_H  62
 #define MB_COLS 3
 #define MB_ROWS 2
-#define MB_BW  (MB_W/MB_COLS)
-#define MB_BH  (MB_H/MB_ROWS)
 
 /* Status bar */
 #define SB_X   0
@@ -282,7 +268,8 @@ void hud_draw_minimap(uint8_t *b, const struct Map *m, const Player *p)
     if (!m) return;
 
     int cw=bw/MAP_SIZE, ch=bh/MAP_SIZE;
-    if(cw<1)cw=1; if(ch<1)ch=1;
+    if(cw<1) cw=1;
+    if(ch<1) ch=1;
     int ox=bx+(bw-cw*MAP_SIZE)/2, oy=by+(bh-ch*MAP_SIZE)/2;
     int x,y;
     for (y=0;y<MAP_SIZE;y++) for (x=0;x<MAP_SIZE;x++) {
@@ -376,19 +363,31 @@ void hud_draw_status(uint8_t *b, const GameState *gs, const struct Map *m)
 
     /* Status message */
     if (gs->player.msg_ticks>0 && gs->player.message[0]) {
-        /* Word-wrap into 2 lines, 8px font, max ~60 chars/line */
+        /* Word-wrap into 2 lines, honouring explicit OVR sign line breaks. */
         const char *msg=gs->player.message;
-        int len=(int)mm_strlen(msg);
         const int MAX=59;
-        if (len<=MAX) {
-            font_print(b,RENDER_W,msg,SB_X+4,SB_Y+4,14,1);
-        } else {
-            int cut=MAX-1;
-            while(cut>0&&msg[cut]!=' ') cut--;
-            if(!cut) cut=MAX-1;
-            char line1[64]; mm_memcpy(line1,msg,(uint32_t)cut); line1[cut]='\0';
+        const char *nl=msg;
+        while(*nl&&*nl!='\n'&&*nl!='\r') nl++;
+        if(*nl){
+            int l1=(int)(nl-msg);
+            char line1[64];
+            if(l1>MAX) l1=MAX;
+            mm_memcpy(line1,msg,(uint32_t)l1); line1[l1]='\0';
             font_print(b,RENDER_W,line1,SB_X+4,SB_Y+4,14,1);
-            font_print(b,RENDER_W,msg+cut+(msg[cut]==' '?1:0),SB_X+4,SB_Y+14,14,1);
+            while(*nl=='\n'||*nl=='\r') nl++;
+            font_print(b,RENDER_W,nl,SB_X+4,SB_Y+14,14,1);
+        } else {
+            int len=(int)mm_strlen(msg);
+            if (len<=MAX) {
+                font_print(b,RENDER_W,msg,SB_X+4,SB_Y+4,14,1);
+            } else {
+                int cut=MAX-1;
+                while(cut>0&&msg[cut]!=' ') cut--;
+                if(!cut) cut=MAX-1;
+                char line1[64]; mm_memcpy(line1,msg,(uint32_t)cut); line1[cut]='\0';
+                font_print(b,RENDER_W,line1,SB_X+4,SB_Y+4,14,1);
+                font_print(b,RENDER_W,msg+cut+(msg[cut]==' '?1:0),SB_X+4,SB_Y+14,14,1);
+            }
         }
     }
 }
@@ -409,7 +408,8 @@ void hud_draw_party(uint8_t *b, const GameState *gs)
         /* Name */
         char line[14]; int li=0;
         const char *nm=c->name; while(*nm&&li<12) line[li++]=*nm++;
-        while(li<12) line[li++]=' '; line[li]='\0';
+        while(li<12) line[li++]=' ';
+        line[li]='\0';
         font_print(b,RENDER_W,line,PT_X+4,ry,col,1);
 
         /* Level */
@@ -426,7 +426,8 @@ void hud_draw_party(uint8_t *b, const GameState *gs)
             bf(b,barx,bary,barw,barh,4); /* dark red background */
             if (c->hp_max>0&&c->hp>0) {
                 int filled=(c->hp*barw)/c->hp_max;
-                if(filled<1)filled=1; if(filled>barw)filled=barw;
+                if(filled<1) filled=1;
+                if(filled>barw) filled=barw;
                 uint8_t bc=(c->hp*3>=c->hp_max*2)?10:(c->hp*2>=c->hp_max)?14:12;
                 bf(b,barx,bary,filled,barh,bc);
             }
