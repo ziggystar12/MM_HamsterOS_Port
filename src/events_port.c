@@ -217,13 +217,19 @@ int handle_tile_event(GameState *gs, const OvrFile *ovr, const char *ovr_text)
             player_set_message(&gs->player, "NO FOOD! CANNOT REST HERE.", 120);
             break;
         }
-        if (gs->party.count > 0 && (int)gs->party.members[0].gold >= cost) {
+        if(gs->party.count>0 && (int)gs->party.members[0].gold >= cost){
             gs->party.members[0].gold -= (uint32_t)cost;
             gs->party.shared_food--;
             for (i=0; i<gs->party.count; i++) {
                 Character *c = &gs->party.members[i];
-                if (!IS_DEADLIKE(c->condition)) { c->hp = c->hp_max; c->sp = c->sp_max; }
+                if (!IS_DEADLIKE(c->condition)) {
+                    c->hp = c->hp_max; c->sp = c->sp_max;
+                    /* Clear recoverable rest-conditions */
+                    c->condition &= (uint8_t)(~(COND_ASLEEP | COND_UNCONSCIOUS));
+                }
             }
+            /* Decrement timed protections */
+            { int j; for(j=0;j<18;j++) if(gs->party.protections[j]>0) gs->party.protections[j]--; }
             player_set_message(&gs->player, "RESTED. HP/SP RESTORED.", 120);
         } else {
             player_set_message(&gs->player, "NOT ENOUGH GOLD TO REST.", 120);
@@ -274,12 +280,12 @@ int handle_tile_event(GameState *gs, const OvrFile *ovr, const char *ovr_text)
         break;
     }
     case SVC_FOOD: {
-        int cost = 5;
+        int cost = 10;
         if (gs->party.count > 0 && (int)gs->party.members[0].gold >= cost) {
             gs->party.members[0].gold -= (uint32_t)cost;
-            gs->party.shared_food += 3;
+            gs->party.shared_food += 10;
             if (gs->party.shared_food > 99) gs->party.shared_food = 99;
-            player_set_message(&gs->player, "3 RATIONS PURCHASED.", 120);
+            player_set_message(&gs->player, "10 RATIONS PURCHASED.", 120);
         } else {
             player_set_message(&gs->player, "NOT ENOUGH GOLD FOR FOOD.", 120);
         }

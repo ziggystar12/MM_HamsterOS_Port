@@ -235,6 +235,11 @@ static void monsters_attack(CombatSession *cs, Party *p) {
                 case 4: t->condition|=COND_POISONED; log_msg(cs,"...POISONED!"); break;
                 case 5: if(monster_roll(100)<=40){t->condition|=COND_PARALYZED; log_msg(cs,"...PARALYZED!");} break;
                 case 6: if(monster_roll(100)<=25&&!IS_DEADLIKE(t->condition)){t->condition=COND_DEAD;t->hp=0;log_msg(cs,"...DEATH GAZE!");} break;
+                case 7: { /* psychic blast: drain INT */
+                    int drain=monster_roll(mg->type->level+2);
+                    t->stats[0]-=drain; if(t->stats[0]<1)t->stats[0]=1;
+                    log_msg(cs,"...INT DRAINED!");
+                } break;
                 default: break;
                 }
                 if (t->hp<=0 && !IS_DEADLIKE(t->condition)) { t->hp=0; t->condition=COND_DEAD; }
@@ -262,6 +267,19 @@ bool combat_round(CombatSession *cs, GameState *gs) {
     monsters_attack(cs, &gs->party);
     if (party_wiped(&gs->party)) {
         log_msg(cs, "PARTY DEFEATED!"); cs->result=CR_DEFEAT; cs->over=true; return true;
+    }
+    /* Condition damage: poisoned = 1 HP/round */
+    { int pi2;
+      for (pi2=0; pi2<gs->party.count; pi2++) {
+        Character *c2=&gs->party.members[pi2];
+        if (!IS_DEADLIKE(c2->condition) && (c2->condition & COND_POISONED)) {
+            c2->hp--; cs->n_hits_dealt++;
+            if (c2->hp<=0) { c2->hp=0; c2->condition|=COND_UNCONSCIOUS; }
+        }
+      }
+      if (party_wiped(&gs->party)) {
+          log_msg(cs,"PARTY DEFEATED!"); cs->result=CR_DEFEAT; cs->over=true; return true;
+      }
     }
     if (cs->round >= 20) {
         log_msg(cs, "Combat ended."); cs->pending_xp/=2; cs->result=CR_VICTORY; cs->over=true; return true;

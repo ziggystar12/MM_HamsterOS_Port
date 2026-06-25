@@ -120,7 +120,7 @@ typedef enum {
     GM_TITLE=0, GM_TOWN_SELECT, GM_EXPLORE, GM_COMBAT,
     GM_OPTIONS, GM_QUIT_CONFIRM, GM_DEFEAT, GM_CHARSHEET,
     GM_SHOP, GM_MAP, GM_SPELL_SELECT, GM_COMBAT_ITEM,
-    GM_SAVE_SLOT, GM_CHAR_CREATE
+    GM_SAVE_SLOT, GM_CHAR_CREATE, GM_PRE_COMBAT, GM_SAGE
 } GameMode;
 
 /* ---- Static state ---- */
@@ -182,6 +182,8 @@ static int          g_cc_stats[7];
 static int          g_cc_hp, g_cc_sp;
 static int          g_cc_member_idx;
 static Party        g_cc_party;
+/* Sage/help page */
+static int          g_sage_page;
 
 /* Monster sprites */
 static uint8_t     *g_monpix_buf;
@@ -193,6 +195,7 @@ static CombatSession g_combat;
 
 /* ---- Forward declarations ---- */
 static void mm_on_map_change(int map_idx);
+static void mm_apply_equip_bonuses(Party *p);
 
 /* ---- FAT helpers ---- */
 static bool mm_find_subdir(FatDrive drive, uint32_t parent,
@@ -255,6 +258,7 @@ static void mm_load_game_data(void)
                 roster_load_buf(rbuf,rsz,&g_gs.party);
             heap_free(rbuf);
         }
+        mm_apply_equip_bonuses(&g_gs.party);
         g_game_ready=true;
         mm_load_ovr_for_map(0);
     }
@@ -363,10 +367,31 @@ static bool mm_load_game_slot(int slot)
             roster_load_buf(rbuf,rsz,&g_gs.party);
         heap_free(rbuf);
     }
+    mm_apply_equip_bonuses(&g_gs.party);
     g_gs.map_idx=ss.map_idx;
     player_init(&g_gs.player,ss.player_x,ss.player_y,ss.player_facing);
     mm_load_ovr_for_map(g_gs.map_idx);
     return true;
+}
+
+/* ---- Apply ItemExtras stat bonuses from equipped items ---- */
+static void mm_apply_equip_bonuses(Party *p)
+{
+    int i, s;
+    for(i=0;i<p->count;i++){
+        Character *c=&p->members[i];
+        for(s=0;s<7;s++) c->equip_bonus[s]=0;
+        for(s=0;s<6;s++){
+            if(!c->equipped[s]) continue;
+            const ItemExtras *ex=item_get_extras(c->equipped[s]);
+            if(ex && ex->stat_idx>=1 && ex->stat_idx<=7)
+                c->equip_bonus[ex->stat_idx-1]+=ex->stat_bonus;
+        }
+        for(s=0;s<7;s++){
+            c->stats[s]=c->stats_base[s]+c->equip_bonus[s];
+            if(c->stats[s]<1) c->stats[s]=1;
+        }
+    }
 }
 
 /* Keep mm_load_game wrapper — used by town_select_confirm Continue option */
@@ -398,7 +423,7 @@ static void mm_start_combat(void){
     extern int monster_roll(int sides);
     monster_rng_seed((unsigned)pit_millis());
     combat_init(&g_combat,&g_gs);
-    g_mode=GM_COMBAT; g_needs_redraw=true;
+    g_mode=GM_PRE_COMBAT; g_needs_redraw=true;
 }
 
 /* ---- App lifecycle ---- */
@@ -1200,6 +1225,7 @@ static void cc_accept(void)
     g_cc_party.count++;
     g_cc_member_idx++;
     g_cc_phase=0; g_cc_cls=0; g_cc_race=0;
+    mm_apply_equip_bonuses(&g_cc_party);
 }
 
 static void mm_enter_char_create(void)
@@ -1293,6 +1319,160 @@ static void draw_char_create_screen(void)
         font_print(g_render_buf,RENDER_W,"Need at least 1 member.  [ESC] Cancel",4,RENDER_H-12,8,1);
 }
 
+/* ---- Pre-combat dialog ---- */
+static void draw_pre_combat_screen(void)
+{
+    int g; uint16_t r;
+    for(r=0;r<RENDER_H;r++) mm_memset(&g_render_buf[r*RENDER_W],0,RENDER_W);
+    {const char *h="ENCOUNTER!"; int tw=font_str_width(h,2);
+     font_print(g_render_buf,RENDER_W,h,(RENDER_W-tw)/2,6,4,2);}
+    for(g=0;g<g_combat.n_groups;g++){
+        MonsterGroup *mg=&g_combat.groups[g];
+        char line[48]; int li=0;
+        line[li++]=(char)('A'+g); line[li++]=':'; line[li++]=' ';
+        const char *mn=mg->type->name; while(*mn&&li<32) line[li++]=*mn++;
+        line[li++]=' '; line[li++]='x';
+        if(mg->count>=10) line[li++]=(char)('0'+mg->count/10);
+        line[li++]=(char)('0'+mg->count%10); line[li]='\0';
+        font_print(g_render_buf,RENDER_W,line,60,50+g*14,12,1);
+    }
+    font_print(g_render_buf,RENDER_W,"[A]ttack  [F]lee  [G]old bribe",
+               60,RENDER_H-30,14,1);
+}
+
+/* ---- Sage/help screen ---- */
+static void draw_sage_screen(void)
+{
+    static const char * const SAGE_PAGES[7][14] = {
+        { /* 1: Movement & Controls */
+          "SAGE WISDOM  (1/7 - Controls)",
+          "---",
+          "MOVE:   W/Up=fwd  S/Dn=back",
+          "        A=strafe L  D=strafe R",
+          "        Q=turn L   E=turn R",
+          "---",
+          "ACTIONS:  B=bash  X=search",
+          "          U=unlock  Z=rest",
+          "          M=map overlay",
+          "          P=save  F1=options",
+          "          1-6=character sheet",
+          "---",
+          "H=this help  ESC=close",
+          NULL
+        },
+        { /* 2: Combat */
+          "SAGE WISDOM  (2/7 - Combat)",
+          "---",
+          "A=attack group A  B=group B  C=group C",
+          "F=flee  G=bribe (costs gold, LCK check)",
+          "S=cast spell  I=use backpack item",
+          "---",
+          "BLESS: +attack bonus for 10+ rounds",
+          "SLEEP: monsters skip attacks each turn",
+          "POISON: 1 HP/round until cured",
+          "---",
+          "Win: XP + gold + possible loot item",
+          "Lose: revive at last town with 1 HP",
+          "Cheat: F1 > C to auto-win battles",
+          NULL
+        },
+        { /* 3: Spells */
+          "SAGE WISDOM  (3/7 - Magic)",
+          "---",
+          "CLERIC spells (need SP + level):",
+          "  Heal/Cure/Raise/Resurrect/Bless",
+          "  Turn Undead  Holy Word  Portal",
+          "  Protection From fire/cold/poison...",
+          "---",
+          "SORCERER spells:",
+          "  Sleep  Haste  Fireball  Lightning",
+          "  Fly/Escape  Teleport  Disintegrate",
+          "---",
+          "High-level spells cost gems (1-2)",
+          "S in combat opens spell menu",
+          NULL
+        },
+        { /* 4: Services */
+          "SAGE WISDOM  (4/7 - Services)",
+          "---",
+          "INN:       rest (costs food + gold)",
+          "TEMPLE:    cure 50g  raise 500g",
+          "           resurrect eradicated 1000g",
+          "TRAINING:  level up for level x 1000g",
+          "BLACKSMITH: B=buy  S=sell  E=sell equip",
+          "FOOD SHOP: 10 rations for 10g",
+          "TAVERN:    rumours + stat drink (5g/+1)",
+          "---",
+          "Yellow=inn  Cyan=temple  Green=training",
+          "Orange=blacksmith  Brown=tavern",
+          "Step on tile then press Y or ENTER",
+          NULL
+        },
+        { /* 5: Items & Equipment */
+          "SAGE WISDOM  (5/7 - Items)",
+          "---",
+          "Equipment slots: weapon/ranged/staff",
+          "                 armor/shield/misc",
+          "---",
+          "Equipped items give AC and damage bonus",
+          "Special items give stat bonuses (+INT etc)",
+          "Potions/wands: I in combat to use",
+          "Wands have charges (spell_id effect)",
+          "---",
+          "SELL: Blacksmith E key (equipped)",
+          "      Blacksmith S key (backpack)",
+          "      Charsheet S key (equipped char)",
+          NULL
+        },
+        { /* 6: Exploration */
+          "SAGE WISDOM  (6/7 - World)",
+          "---",
+          "5 towns  ->  5 dungeons (caves/etc)",
+          "Outdoor areas: 4x5 grid, walk off edge",
+          "---",
+          "TRAPS: pit (Levitate bypasses)",
+          "       poison gas / acid / stalactites",
+          "CHESTS: Robber can disarm (thievery)",
+          "SHRINES: step+Y for stat/gem/heal bonus",
+          "DOORS: U to unlock  B to bash",
+          "DARK rooms: Lasting Light / Light spell",
+          "---",
+          "Starvation: 1 HP every 15 steps at 0 food",
+          NULL
+        },
+        { /* 7: Tips */
+          "SAGE WISDOM  (7/7 - Tips & Secrets)",
+          "---",
+          "The courier quest (Sorpigal->Erliquin)",
+          "gives huge XP - do it early",
+          "---",
+          "Cave 1 arena: fight for 500 XP/member",
+          "Pirate Cove (Area A-2, 15,7): Coral Key",
+          "King's Pass (Erliquin 13,6): 5000g pass",
+          "Pyramid 4 levels: 500 XP each first visit",
+          "---",
+          "Save often. Robber in party = 70% unlock",
+          "Levitate protects from all pit traps",
+          "Bribe works best with high LCK characters",
+          NULL
+        }
+    };
+    int i; uint16_t r;
+    for(r=0;r<RENDER_H;r++) mm_memset(&g_render_buf[r*RENDER_W],0,RENDER_W);
+    int pg = g_sage_page < 7 ? g_sage_page : 0;
+    const char * const *lines = SAGE_PAGES[pg];
+    for(i=0; lines[i] && i<14; i++){
+        const char *ln = lines[i];
+        uint8_t col = (i==0)?14:(ln[0]=='-')?8:7;
+        if(i==0){ int tw=font_str_width(ln,1);
+                  font_print(g_render_buf,RENDER_W,ln,(RENDER_W-tw)/2,4,col,1); }
+        else if(ln[0]=='-') mm_memset(&g_render_buf[(14+i*12)*RENDER_W+10],8,RENDER_W-20);
+        else font_print(g_render_buf,RENDER_W,ln,10,14+i*12,col,1);
+    }
+    font_print(g_render_buf,RENDER_W,"LEFT/RIGHT to turn pages  ESC or H to close",
+               10,RENDER_H-12,8,1);
+}
+
 /* ---- Rendering ---- */
 void mm_port_draw(void){
     int16_t cx,cy,cw,ch,bx,by,bw,bh;
@@ -1366,6 +1546,12 @@ void mm_port_draw(void){
         blit_opaque_pixels(cx,cy,g_render_buf,RENDER_W,0,0,RENDER_W,RENDER_H,1);
     } else if(g_mode==GM_CHAR_CREATE){
         draw_char_create_screen();
+        blit_opaque_pixels(cx,cy,g_render_buf,RENDER_W,0,0,RENDER_W,RENDER_H,1);
+    } else if(g_mode==GM_PRE_COMBAT){
+        draw_pre_combat_screen();
+        blit_opaque_pixels(cx,cy,g_render_buf,RENDER_W,0,0,RENDER_W,RENDER_H,1);
+    } else if(g_mode==GM_SAGE){
+        draw_sage_screen();
         blit_opaque_pixels(cx,cy,g_render_buf,RENDER_W,0,0,RENDER_W,RENDER_H,1);
     } else if(g_game_ready){
         const struct Map *m=&g_maps[g_gs.map_idx];
@@ -1479,7 +1665,14 @@ static void do_combat_key(uint8_t sc){
                 check_level_ups();
             }
             if(g_combat.result==CR_DEFEAT) g_mode=GM_DEFEAT;
-            else                           g_mode=GM_EXPLORE;
+            else {
+                g_mode=GM_EXPLORE;
+                /* Auto-search tile after victory */
+                if(g_gs.auto_search && g_ovr_loaded){
+                    const char *at=ovr_text_at(&g_ovr,g_gs.player.x,g_gs.player.y,g_gs.player.facing);
+                    handle_tile_event(&g_gs,&g_ovr,at);
+                }
+            }
             g_needs_redraw=true;
         }
         return;
@@ -1673,6 +1866,7 @@ bool mm_port_scancode(uint8_t sc){
                 int val=it?it->cost/2:0;
                 if(val>0) g_gs.party.members[0].gold+=(uint32_t)val;
                 cc->equipped[s2]=0;
+                mm_apply_equip_bonuses(&g_gs.party);
                 player_set_message(&g_gs.player,"ITEM SOLD.",60);
                 g_needs_redraw=true; return true;
             }
@@ -1693,6 +1887,15 @@ bool mm_port_scancode(uint8_t sc){
             if(st&&g_shop_scroll<cnt3){
                 int id=st[g_shop_scroll]; const ItemDef *it=item_get(id);
                 if(it&&g_gs.party.count>0&&(int)g_gs.party.members[0].gold>=it->cost){
+                    /* Class restriction check */
+                    if(it->class_mask!=0xFF){
+                        int can_use=0,i2c;
+                        for(i2c=0;i2c<g_gs.party.count;i2c++){
+                            int cls=g_gs.party.members[i2c].cls;
+                            if(cls>=1&&cls<=6&&(it->class_mask&(1<<(cls-1)))) {can_use=1;break;}
+                        }
+                        if(!can_use){player_set_message(&g_gs.player,"NO ONE CAN USE THIS.",60);g_needs_redraw=true;return true;}
+                    }
                     int i2,s2;
                     for(i2=0;i2<g_gs.party.count;i2++){
                         for(s2=0;s2<6;s2++) if(g_gs.party.members[i2].backpack[s2]==0){
@@ -1730,6 +1933,7 @@ bool mm_port_scancode(uint8_t sc){
                     int val=it?it->cost/2:0;
                     if(val>0) g_gs.party.members[0].gold+=(uint32_t)val;
                     g_gs.party.members[i3e].equipped[s3e]=0;
+                    mm_apply_equip_bonuses(&g_gs.party);
                     player_set_message(&g_gs.player,"EQUIPPED ITEM SOLD.",60);
                     g_needs_redraw=true; return true;
                 }
@@ -1792,6 +1996,55 @@ bool mm_port_scancode(uint8_t sc){
             if(g_mode==GM_COMBAT_ITEM) g_mode=GM_COMBAT;
             g_needs_redraw=true; return true;
         }
+        return true;
+    }
+    /* Pre-combat dialog */
+    if(g_mode==GM_PRE_COMBAT){
+        if(sc==0x1E||sc==0x1C||sc==0x39){ /* A or Enter: attack */
+            g_mode=GM_COMBAT; g_needs_redraw=true; return true;
+        }
+        if(sc==0x21){ /* F: flee before combat */
+            extern int monster_roll(int);
+            combat_flee(&g_combat,&g_gs);
+            if(g_combat.over) g_mode=GM_EXPLORE;
+            else { player_set_message(&g_gs.player,"CAN'T ESCAPE!",60); g_mode=GM_COMBAT; }
+            g_needs_redraw=true; return true;
+        }
+        if(sc==0x22){ /* G: bribe before combat */
+            extern int monster_roll(int);
+            int gi3=0;
+            int cost=g_combat.groups[gi3].type->level*10+5;
+            if(g_gs.party.count>0&&(int)g_gs.party.members[0].gold>=cost){
+                g_gs.party.members[0].gold-=(uint32_t)cost;
+                int lck=0,pi3;
+                for(pi3=0;pi3<g_gs.party.count;pi3++)
+                    if(!IS_DEADLIKE(g_gs.party.members[pi3].condition)&&
+                       g_gs.party.members[pi3].stats[6]>lck)
+                        lck=g_gs.party.members[pi3].stats[6];
+                int lmod=(lck-10)/2; if(lmod<0)lmod=0;
+                if(monster_roll(20)+lmod>=12){
+                    g_combat.over=true; g_combat.result=CR_FLED;
+                    player_set_message(&g_gs.player,"BRIBED! MONSTERS FLEE.",90);
+                    g_mode=GM_EXPLORE;
+                } else {
+                    player_set_message(&g_gs.player,"BRIBE FAILED!",60);
+                    g_mode=GM_COMBAT;
+                }
+            } else {
+                player_set_message(&g_gs.player,"NOT ENOUGH GOLD TO BRIBE.",60);
+                g_mode=GM_COMBAT;
+            }
+            g_needs_redraw=true; return true;
+        }
+        return true;
+    }
+    /* Sage help */
+    if(g_mode==GM_SAGE){
+        if(sc==0x01||sc==0x23){ g_mode=g_prev_mode; g_needs_redraw=true; return true; }
+        if(sc==0xCB&&g_sage_page>0){ g_sage_page--; g_needs_redraw=true; return true; }
+        if(sc==0xCD&&g_sage_page<6){ g_sage_page++; g_needs_redraw=true; return true; }
+        if(sc==0xC8&&g_sage_page>0){ g_sage_page--; g_needs_redraw=true; return true; }
+        if(sc==0xD0&&g_sage_page<6){ g_sage_page++; g_needs_redraw=true; return true; }
         return true;
     }
     /* Save slot picker */
@@ -1957,6 +2210,30 @@ bool mm_port_scancode(uint8_t sc){
     }
     if(sc==0x19&&g_game_ready){ /* P: save → slot picker */
         mm_enter_save_slot(0); return true;
+    }
+    if(sc==0x2C&&g_game_ready){ /* Z: rest anywhere */
+        if(g_gs.party.shared_food>0){
+            extern int monster_roll(int);
+            g_gs.party.shared_food--;
+            int i5;
+            for(i5=0;i5<g_gs.party.count;i5++){
+                Character *c5=&g_gs.party.members[i5];
+                if(!IS_DEADLIKE(c5->condition)&&!(c5->condition&COND_UNCONSCIOUS)){
+                    int heal=1+c5->level/2;
+                    c5->hp+=heal; if(c5->hp>c5->hp_max) c5->hp=c5->hp_max;
+                    if(c5->sp<c5->sp_max) c5->sp++;
+                    c5->condition&=(uint8_t)(~(COND_ASLEEP|COND_UNCONSCIOUS));
+                }
+            }
+            player_set_message(&g_gs.player,"RESTED BRIEFLY.",90);
+            if(g_gs.map_idx>=5&&monster_roll(100)<=30) mm_start_combat();
+        } else {
+            player_set_message(&g_gs.player,"NO FOOD TO REST WITH.",60);
+        }
+        g_needs_redraw=true; return true;
+    }
+    if(sc==0x23&&g_game_ready){ /* H: sage help */
+        g_sage_page=0; g_prev_mode=g_mode; g_mode=GM_SAGE; g_needs_redraw=true; return true;
     }
     if(sc==0x32&&g_game_ready){ /* M: map overlay */
         g_prev_mode=g_mode; g_mode=GM_MAP; g_needs_redraw=true; return true;
