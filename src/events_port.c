@@ -7,6 +7,8 @@
 #include "mm_util.h"
 #include <stddef.h>
 
+extern int monster_roll(int sides);  /* from monsters.c */
+
 #define strcasestr(h,n) mm_strcasestr((h),(n))
 #define strlen(s)       mm_strlen(s)
 
@@ -229,18 +231,45 @@ int handle_tile_event(GameState *gs, const OvrFile *ovr, const char *ovr_text)
         break;
     }
     case SVC_TEMPLE: {
-        int cost = 100;
-        int i;
-        if (gs->party.count > 0 && (int)gs->party.members[0].gold >= cost) {
+        int i, has_erad=0, has_dead=0, has_cond=0;
+        for(i=0;i<gs->party.count;i++){
+            uint8_t cd=(uint8_t)gs->party.members[i].condition;
+            if(cd==0xFF) has_erad=1;
+            else if(cd==0xC0||cd==0xA0) has_dead=1;
+            else if(cd!=0) has_cond=1;
+        }
+        int cost = has_erad ? 1000 : (has_dead ? 500 : 50);
+        if(!has_erad && !has_dead && !has_cond){
+            player_set_message(&gs->player,"PARTY IS IN GOOD HEALTH.",90); break;
+        }
+        if(gs->party.count>0 && (int)gs->party.members[0].gold >= cost){
             gs->party.members[0].gold -= (uint32_t)cost;
-            for (i=0; i<gs->party.count; i++) {
-                Character *c = &gs->party.members[i];
-                if (c->condition != 0xFF && c->condition != 0xA0)
-                    c->condition = 0;
+            for(i=0;i<gs->party.count;i++){
+                Character *c2=&gs->party.members[i];
+                if(has_erad){
+                    if(c2->condition==0xFF){c2->condition=0;if(c2->hp<=0)c2->hp=1;}
+                } else if(has_dead){
+                    if(c2->condition==0xC0||c2->condition==0xA0){c2->condition=0;if(c2->hp<=0)c2->hp=1;}
+                } else {
+                    if(c2->condition!=0xFF&&c2->condition!=0xC0&&c2->condition!=0xA0)
+                        c2->condition=0;
+                }
             }
-            player_set_message(&gs->player, "ALL CONDITIONS HEALED.", 120);
+            const char *msg = has_erad?"ERADICATED RESURRECTED! (1000g)":
+                              (has_dead?"DEAD RAISED! (500g)":"CONDITIONS CURED. (50g)");
+            player_set_message(&gs->player,msg,120);
         } else {
-            player_set_message(&gs->player, "NEED 100 GOLD FOR HEALING.", 120);
+            /* Build "NEED Xg FOR TEMPLE." without snprintf */
+            char nmsg[40]; int ni=0;
+            const char *np="NEED "; while(*np) nmsg[ni++]=(char)*np++;
+            int cv=cost;
+            if(cv>=1000){nmsg[ni++]=(char)('0'+cv/1000);cv%=1000;}
+            if(cv>=100){nmsg[ni++]=(char)('0'+cv/100);cv%=100;}
+            if(cv>=10){nmsg[ni++]=(char)('0'+cv/10);cv%=10;}
+            nmsg[ni++]=(char)('0'+cv);
+            const char *ns="g FOR TEMPLE."; while(*ns) nmsg[ni++]=(char)*ns++;
+            nmsg[ni]='\0';
+            player_set_message(&gs->player,nmsg,120);
         }
         break;
     }
@@ -287,32 +316,101 @@ int handle_tile_event(GameState *gs, const OvrFile *ovr, const char *ovr_text)
         player_set_message(&gs->player, "BROWSE_SHOP", 1);
         break;
     case SVC_TAVERN: {
-        /* Show first long OVR string as a tavern rumour */
-        if (ovr && ovr->num_strings > 0) {
+        static int drink_ctr = 0;
+        static const char *SNM[7]={"INT","MIG","PER","END","SPD","ACC","LCK"};
+        int i;
+        /* Build combined message: rumour + drink */
+        char full_msg[400]; int fmi=0;
+        const char *rumour = NULL;
+        if(ovr && ovr->num_strings > 0){
             int si;
-            for (si=0; si<ovr->num_strings; si++) {
-                if ((int)mm_strlen(ovr->strings[si]) >= 12) {
-                    player_set_message(&gs->player, ovr->strings[si], 180);
-                    break;
-                }
-            }
-            if (si >= ovr->num_strings)
-                player_set_message(&gs->player,"You hear nothing useful.", 90);
-        } else {
-            player_set_message(&gs->player,"BARKEEP: No news from the road.", 90);
+            for(si=0;si<ovr->num_strings;si++)
+                if((int)mm_strlen(ovr->strings[si])>=12){rumour=ovr->strings[si];break;}
         }
+        const char *r_use = rumour ? rumour : "BARKEEP: No news from the road.";
+        while(*r_use && fmi<280) full_msg[fmi++]=(char)*r_use++;
+        /* Drink: 5g per round, rotating +1 stat */
+        if(gs->party.count>0 && (int)gs->party.members[0].gold >= 5){
+            int si2=drink_ctr%7; drink_ctr++;
+            for(i=0;i<gs->party.count;i++){
+                Character *c2=&gs->party.members[i];
+                if(!IS_DEADLIKE(c2->condition)&&c2->stats[si2]<25) c2->stats[si2]++;
+            }
+            gs->party.members[0].gold-=5;
+            const char *dp="  DRINKS: +1 "; while(*dp&&fmi<360) full_msg[fmi++]=(char)*dp++;
+            const char *sn=SNM[si2]; while(*sn&&fmi<364) full_msg[fmi++]=(char)*sn++;
+            full_msg[fmi++]='!'; full_msg[fmi++]=' '; full_msg[fmi++]='('; full_msg[fmi++]='5'; full_msg[fmi++]='g'; full_msg[fmi++]=')';
+        }
+        full_msg[fmi]='\0';
+        player_set_message(&gs->player, full_msg, 180);
         break;
     }
     case SVC_ENCOUNTER:
         /* mm_port.c handles actual combat — just set a message here */
         player_set_message(&gs->player, "MONSTERS APPROACH!", 60);
         break;
-    case SVC_TRAP:
-        player_set_message(&gs->player, "A TRAP IS SPRUNG! (COMING SOON)", 180);
+    case SVC_TRAP: {
+        /* Robber gets a disarm attempt */
+        int robber_lvl=0, i;
+        for(i=0;i<gs->party.count;i++){
+            Character *c2=&gs->party.members[i];
+            if(c2->cls==6&&!IS_DEADLIKE(c2->condition)&&c2->level>robber_lvl)
+                robber_lvl=c2->level;
+        }
+        if(robber_lvl>0 && monster_roll(20)+robber_lvl >= 14){
+            player_set_message(&gs->player,"ROBBER DISARMS THE TRAP!",120);
+        } else {
+            int dmg=monster_roll(8);
+            for(i=0;i<gs->party.count;i++){
+                Character *c2=&gs->party.members[i];
+                if(!IS_DEADLIKE(c2->condition)){c2->hp-=dmg;if(c2->hp<0)c2->hp=0;}
+            }
+            char tmsg[40]; int ti=0;
+            const char *tp="TRAP! -"; while(*tp) tmsg[ti++]=(char)*tp++;
+            if(dmg>=10) tmsg[ti++]=(char)('0'+dmg/10);
+            tmsg[ti++]=(char)('0'+dmg%10);
+            const char *th=" HP damage!"; while(*th) tmsg[ti++]=(char)*th++;
+            tmsg[ti]='\0';
+            player_set_message(&gs->player,tmsg,120);
+        }
         break;
-    case SVC_SHRINE:
-        player_set_message(&gs->player, "You sense a holy presence.", 120);
+    }
+    case SVC_SHRINE: {
+        static const char *SKW[7]={"INT","MIG","PER","END","SPD","ACC","LCK"};
+        static const char *SKW2[7]={"INTELLIGENCE","MIGHT","PERSONALITY","ENDURANCE","SPEED","ACCURACY","LUCK"};
+        const char *st = text ? text : "";
+        int i, stat_idx=-1, applied=0;
+        for(i=0;i<7&&stat_idx<0;i++)
+            if(strcasestr(st,SKW[i])||strcasestr(st,SKW2[i])) stat_idx=i;
+        if(stat_idx>=0){
+            for(i=0;i<gs->party.count;i++){
+                Character *c2=&gs->party.members[i];
+                if(!IS_DEADLIKE(c2->condition)&&c2->stats[stat_idx]<25) c2->stats[stat_idx]++;
+            }
+            char msg[32]; int mi=0;
+            const char *mp="BLESSED: +1 "; while(*mp) msg[mi++]=(char)*mp++;
+            const char *sn=SKW[stat_idx]; while(*sn) msg[mi++]=(char)*sn++;
+            msg[mi++]='!'; msg[mi]='\0';
+            player_set_message(&gs->player,msg,120); applied=1;
+        } else if(strcasestr(st,"GEM")||strcasestr(st,"TREASURE")){
+            int gems=monster_roll(3);
+            for(i=0;i<gs->party.count;i++)
+                if(!IS_DEADLIKE(gs->party.members[i].condition)) gs->party.members[i].gems+=gems;
+            player_set_message(&gs->player,"SHRINE GRANTS GEMS!",120); applied=1;
+        } else if(strcasestr(st,"HEAL")||strcasestr(st,"HEALTH")){
+            for(i=0;i<gs->party.count;i++){
+                Character *c2=&gs->party.members[i];
+                if(!IS_DEADLIKE(c2->condition)){c2->hp+=20;if(c2->hp>c2->hp_max)c2->hp=c2->hp_max;}
+            }
+            player_set_message(&gs->player,"SHRINE RESTORES HEALTH!",120); applied=1;
+        } else if(strcasestr(st,"CURE")||strcasestr(st,"CLEANSE")||strcasestr(st,"PURIFY")){
+            for(i=0;i<gs->party.count;i++)
+                if(!IS_DEADLIKE(gs->party.members[i].condition)) gs->party.members[i].condition=0;
+            player_set_message(&gs->player,"SHRINE CURES CONDITIONS!",120); applied=1;
+        }
+        if(!applied) player_set_message(&gs->player,"You feel blessed by a holy presence.",120);
         break;
+    }
     default:
         break;
     }
@@ -327,10 +425,45 @@ void handle_floor_trap(GameState *gs, const OvrFile *ovr)
                                     gs->player.facing);
     if (!text || !*text) return;
     ServiceType svc = detect_service(text);
-    if (svc == SVC_FLOOR_TRAP) {
-        player_set_message(&gs->player, text, 120);
-        /* TODO: apply trap damage */
+    if (svc != SVC_FLOOR_TRAP) return;
+    player_set_message(&gs->player, text, 120);
+
+    int i, dmg=0;
+    if(strcasestr(text,"PIT TRAP")||strcasestr(text,"TRAP DOOR")){
+        /* Levitate bypasses pit traps */
+        if(gs->party.protections[PROT_LEVITATE]>0) return;
+        dmg=monster_roll(10);
+        for(i=0;i<gs->party.count;i++){
+            Character *c2=&gs->party.members[i];
+            if(!IS_DEADLIKE(c2->condition)){c2->hp-=dmg;if(c2->hp<0)c2->hp=0;}
+        }
+    } else if(strcasestr(text,"POISON GAS")||strcasestr(text,"POISON POOL")){
+        for(i=0;i<gs->party.count;i++)
+            if(!IS_DEADLIKE(gs->party.members[i].condition))
+                gs->party.members[i].condition|=COND_POISONED;
+    } else if(strcasestr(text,"ACID")){
+        dmg=monster_roll(6);
+        for(i=0;i<gs->party.count;i++){
+            Character *c2=&gs->party.members[i];
+            if(!IS_DEADLIKE(c2->condition)){
+                c2->hp-=dmg; if(c2->hp<0)c2->hp=0;
+                c2->condition|=COND_POISONED;
+            }
+        }
+    } else if(strcasestr(text,"STALACTITE")){
+        dmg=monster_roll(6);
+        for(i=0;i<gs->party.count;i++){
+            Character *c2=&gs->party.members[i];
+            if(!IS_DEADLIKE(c2->condition)){c2->hp-=dmg;if(c2->hp<0)c2->hp=0;}
+        }
+    } else {
+        dmg=monster_roll(8);
+        for(i=0;i<gs->party.count;i++){
+            Character *c2=&gs->party.members[i];
+            if(!IS_DEADLIKE(c2->condition)){c2->hp-=dmg;if(c2->hp<0)c2->hp=0;}
+        }
     }
+    (void)dmg;
 }
 
 /* ---- area_edge_transition ---- */

@@ -78,6 +78,17 @@ const char *mm_strcasestr(const char *h, const char *n) {
     return 0;
 }
 
+/* Case-sensitive N-char prefix comparison (returns 0 if equal) */
+static inline __attribute__((unused))
+int mm_strncmp(const char *a, const char *b, uint32_t n) {
+    for (uint32_t i = 0; i < n; i++) {
+        if ((unsigned char)a[i] != (unsigned char)b[i])
+            return (int)(unsigned char)a[i] - (int)(unsigned char)b[i];
+        if (!a[i]) return 0;
+    }
+    return 0;
+}
+
 /* Minimal snprintf: supports %d %u %s %c %% only */
 #include <stdarg.h>
 static inline __attribute__((unused))

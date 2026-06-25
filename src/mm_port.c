@@ -110,11 +110,17 @@ typedef struct {
 } SaveState;
 #define SAVE_MAGIC 0x4D4D3153u
 
+/* ---- Save slot filenames (3 slots) ---- */
+static const char * const SAVE_FNAMES[3]  = {"SAVE1.DAT","SAVE2.DAT","SAVE3.DAT"};
+static const char * const ROSTR_FNAMES[3] = {"ROSTR1.DTA","ROSTR2.DTA","ROSTR3.DTA"};
+typedef struct { bool exists; uint8_t map_idx; } SaveSlotInfo;
+
 /* ---- Game mode ---- */
 typedef enum {
     GM_TITLE=0, GM_TOWN_SELECT, GM_EXPLORE, GM_COMBAT,
     GM_OPTIONS, GM_QUIT_CONFIRM, GM_DEFEAT, GM_CHARSHEET,
-    GM_SHOP, GM_MAP, GM_SPELL_SELECT, GM_COMBAT_ITEM
+    GM_SHOP, GM_MAP, GM_SPELL_SELECT, GM_COMBAT_ITEM,
+    GM_SAVE_SLOT, GM_CHAR_CREATE
 } GameMode;
 
 /* ---- Static state ---- */
@@ -162,6 +168,20 @@ static uint32_t     g_mm_cluster;
 
 /* Title */
 static int          g_title_idx;
+static uint32_t     g_title_next_change;
+
+/* Save slot state */
+static int          g_save_slot_mode;    /* 0=saving 1=loading */
+static int          g_save_slot_cursor;
+static SaveSlotInfo g_slot_info[3];
+
+/* Character creation state */
+static int          g_cc_phase;          /* 0=class 1=race 2=stats */
+static int          g_cc_cls, g_cc_race;
+static int          g_cc_stats[7];
+static int          g_cc_hp, g_cc_sp;
+static int          g_cc_member_idx;
+static Party        g_cc_party;
 
 /* Monster sprites */
 static uint8_t     *g_monpix_buf;
@@ -242,11 +262,15 @@ static void mm_load_game_data(void)
     /* Give party starting food (10 rations) if none loaded */
     if(g_gs.party.shared_food <= 0) g_gs.party.shared_food = 10;
 
-    /* Check for save file */
+    /* Check for save files across all 3 slots */
     {
-        uint8_t stest[8];uint32_t ssz=0;bool st=false;
-        g_save_exists=fat_load_file(FAT_DRIVE_B,g_mm_cluster,"SAVESTAT.DAT",
-                                     (char*)stest,8,&ssz,&st) && ssz>=8;
+        int ss2; g_save_exists=false;
+        for(ss2=0;ss2<3;ss2++){
+            uint8_t stest[8]; uint32_t ssz=0; bool st=false;
+            if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,SAVE_FNAMES[ss2],
+                             (char*)stest,8,&ssz,&st) && ssz>=8)
+                { g_save_exists=true; break; }
+        }
     }
 
     /* MONPIX — embedded in app */
@@ -257,31 +281,18 @@ static void mm_load_game_data(void)
 
     /* PC speaker music only */
 
-    g_title_idx=0;
+    g_title_idx=0; g_title_next_change=0;
     mm_load_title_screen(0);
     g_mode=GM_TITLE;
     g_needs_redraw=true;
     serial_str("MM: ready\n");
 }
 
-/* ---- Save / Load ---- */
-static void mm_save_game(void)
+/* ---- Save / Load (slot-based) ---- */
+static void mm_build_roster_raw(uint8_t *raw)
 {
-    extern void fat_batch_begin(FatDrive d);
-    extern void fat_batch_end(FatDrive d);
-
-    player_set_message(&g_gs.player,"Saving...",30);  /* feedback before write */
-
-    SaveState ss;
-    ss.magic=SAVE_MAGIC;
-    ss.map_idx=(uint8_t)g_gs.map_idx;
-    ss.player_x=(uint8_t)g_gs.player.x;
-    ss.player_y=(uint8_t)g_gs.player.y;
-    ss.player_facing=(uint8_t)g_gs.player.facing;
-
-    /* Save roster */
-    static uint8_t raw[18*127+18]; int i,s;
-    mm_memset(raw,0,sizeof(raw));
+    int i,s;
+    mm_memset(raw,0,18*127+18);
     for(i=0;i<g_gs.party.count&&i<18;i++){
         Character *c=&g_gs.party.members[i];
         uint8_t *r=raw+i*127;
@@ -299,34 +310,55 @@ static void mm_save_game(void)
         mm_memcpy(r+0x70,c->char_quests,8);r[0x7B]=c->visit_flags;
         raw[18*127+i]=1;
     }
+}
 
-    /* Batch writes to minimise floppy seek time */
+static void mm_save_game_slot(int slot)
+{
+    extern void fat_batch_begin(FatDrive d);
+    extern void fat_batch_end(FatDrive d);
+    if(slot<0||slot>2) slot=0;
+
+    player_set_message(&g_gs.player,"Saving...",30);
+
+    SaveState ss;
+    ss.magic=SAVE_MAGIC;
+    ss.map_idx=(uint8_t)g_gs.map_idx;
+    ss.player_x=(uint8_t)g_gs.player.x;
+    ss.player_y=(uint8_t)g_gs.player.y;
+    ss.player_facing=(uint8_t)g_gs.player.facing;
+
+    static uint8_t raw[18*127+18];
+    mm_build_roster_raw(raw);
+
     fat_batch_begin(FAT_DRIVE_B);
-    bool ok1 = fat_save_file(FAT_DRIVE_B,g_mm_cluster,"SAVESTAT.DAT",
-                              (const char*)&ss,sizeof(ss));
-    bool ok2 = fat_save_file(FAT_DRIVE_B,g_mm_cluster,"ROSTER.DTA",
-                              (const char*)raw,sizeof(raw));
+    bool ok1=fat_save_file(FAT_DRIVE_B,g_mm_cluster,SAVE_FNAMES[slot],
+                            (const char*)&ss,sizeof(ss));
+    bool ok2=fat_save_file(FAT_DRIVE_B,g_mm_cluster,ROSTR_FNAMES[slot],
+                            (const char*)raw,sizeof(raw));
     fat_batch_end(FAT_DRIVE_B);
 
-    if(ok1 && ok2){
+    if(ok1&&ok2){
         g_save_exists=true;
+        g_slot_info[slot].exists=true;
+        g_slot_info[slot].map_idx=(uint8_t)g_gs.map_idx;
         player_set_message(&g_gs.player,"GAME SAVED.",90);
     } else {
         player_set_message(&g_gs.player,"SAVE FAILED - check disk.",90);
     }
 }
 
-static bool mm_load_game(void)
+static bool mm_load_game_slot(int slot)
 {
+    if(slot<0||slot>2) return false;
     SaveState ss; uint32_t ssz=0; bool st=false;
-    if(!fat_load_file(FAT_DRIVE_B,g_mm_cluster,"SAVESTAT.DAT",
+    if(!fat_load_file(FAT_DRIVE_B,g_mm_cluster,SAVE_FNAMES[slot],
                       (char*)&ss,sizeof(ss),&ssz,&st)) return false;
     if(ssz<sizeof(ss)||ss.magic!=SAVE_MAGIC) return false;
 
     uint8_t *rbuf=(uint8_t*)heap_alloc(4096);
     if(rbuf){
-        uint32_t rsz=0;bool rt=false;
-        if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,"ROSTER.DTA",
+        uint32_t rsz=0; bool rt=false;
+        if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,ROSTR_FNAMES[slot],
                          (char*)rbuf,4096,&rsz,&rt))
             roster_load_buf(rbuf,rsz,&g_gs.party);
         heap_free(rbuf);
@@ -335,6 +367,29 @@ static bool mm_load_game(void)
     player_init(&g_gs.player,ss.player_x,ss.player_y,ss.player_facing);
     mm_load_ovr_for_map(g_gs.map_idx);
     return true;
+}
+
+/* Keep mm_load_game wrapper — used by town_select_confirm Continue option */
+static bool mm_load_game(void) { return mm_load_game_slot(0); }
+
+/* Enter save-slot picker */
+static void mm_enter_save_slot(int mode)
+{
+    g_save_slot_mode=mode;
+    g_save_slot_cursor=0;
+    int ss2;
+    for(ss2=0;ss2<3;ss2++){
+        g_slot_info[ss2].exists=false;
+        g_slot_info[ss2].map_idx=0;
+        SaveState sst; uint32_t ssz=0; bool st2=false;
+        if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,SAVE_FNAMES[ss2],
+                         (char*)&sst,sizeof(sst),&ssz,&st2)
+           && ssz>=sizeof(sst) && sst.magic==SAVE_MAGIC){
+            g_slot_info[ss2].exists=true;
+            g_slot_info[ss2].map_idx=sst.map_idx;
+        }
+    }
+    g_prev_mode=g_mode; g_mode=GM_SAVE_SLOT; g_needs_redraw=true;
 }
 
 /* ---- Start combat ---- */
@@ -440,7 +495,7 @@ static void draw_town_select_screen(void){
             font_print(g_render_buf,RENDER_W,"(no save)",220,y,8,1);
     }
 
-    font_print(g_render_buf,RENDER_W,"UP/DOWN or 1-5  ENTER/CLICK to confirm",
+    font_print(g_render_buf,RENDER_W,"UP/DOWN or 1-5  ENTER/CLICK to confirm  [N] New Party",
                20,420,8,1);
 }
 
@@ -534,8 +589,8 @@ static void draw_combat_screen(void){
     }
 
     const char *prompt=g_combat.over?"ENTER to continue":
-        (g_combat.bless_rounds>0?"[A]ttack [F]lee [S]pell [I]tem *BLESSED*":
-                                  "[A]ttack [F]lee [S]pell [I]tem");
+        (g_combat.bless_rounds>0?"[A]ttack [F]lee [S]pell [I]tem [G]bribe *BLESSED*":
+                                  "[A]ttack [F]lee [S]pell [I]tem [G]bribe");
     font_print(g_render_buf,RENDER_W,prompt,RENDER_W/2,174,14,1);
 }
 
@@ -561,7 +616,7 @@ static void draw_shop_screen(void)
         font_print(g_render_buf,RENDER_W,"No items in stock.",20,60,8,1); return;
     }
 
-    font_print(g_render_buf,RENDER_W,"Item                    Cost  [B]uy  [S]ell  [ESC]close",
+    font_print(g_render_buf,RENDER_W,"Item                    Cost  [B]uy  [S]ell backpack  [E]quipped  [ESC]close",
                10,38,7,1);
     mm_memset(&g_render_buf[48*RENDER_W+10],11,620);
 
@@ -1085,6 +1140,156 @@ static void mm_cast_spell(const SpellDef *sp, Character *caster)
     (void)gi; (void)g2; (void)k; (void)t;
 }
 
+/* ---- Character creation helpers ---- */
+static void cc_roll_stats(void)
+{
+    extern int monster_roll(int);
+    static const int RACE_BASE[5][7]={
+        {10,10,10,10,10,10,10}, /* Human */
+        {12, 7,10, 8,12,10,10}, /* Elf */
+        { 6,14, 8,14, 8,10, 6}, /* Dwarf */
+        { 7,10,10,10, 9,10,15}, /* Gnome */
+        { 4,16, 5,16, 8,10, 5}, /* Half-Orc */
+    };
+    static const int CLS_BNS[6][7]={
+        { 0,+4, 0,+2, 0,+2, 0}, /* Knight */
+        { 0,+3,+2,+2, 0,+1, 0}, /* Paladin */
+        {+2,+2, 0,+1,+2,+2, 0}, /* Archer */
+        {+2, 0,+3,+1, 0, 0,+2}, /* Cleric */
+        {+4, 0,+1, 0,+2, 0,+2}, /* Sorcerer */
+        { 0,+2, 0,+1,+3,+2,+2}, /* Robber */
+    };
+    static const int HP_DIE[7]={0,12,10,8,8,6,8};
+    static const int SP_ST[7] ={0, 0, 2,2,2,3,0};
+    int s;
+    for(s=0;s<7;s++){
+        int v=RACE_BASE[g_cc_race-1][s]+CLS_BNS[g_cc_cls-1][s]
+             +monster_roll(6)+monster_roll(6)+monster_roll(6);
+        if(v<3) v=3;
+        if(v>25) v=25;
+        g_cc_stats[s]=v;
+    }
+    int end_mod=(g_cc_stats[3]-10)/2;
+    g_cc_hp=1+monster_roll(HP_DIE[g_cc_cls])+end_mod;
+    if(g_cc_hp<1) g_cc_hp=1;
+    g_cc_sp=SP_ST[g_cc_cls];
+}
+
+static void cc_accept(void)
+{
+    extern int monster_roll(int);
+    static const char *CLS_NM[7]={"","KNIGHT","PALADIN","ARCHER","CLERIC","SORCER","ROBBER"};
+    static const char *RACE_NM[6]={"","HUM","ELF","DWF","GNM","HLF"};
+    if(g_cc_member_idx>=MAX_PARTY) return;
+    Character *c=&g_cc_party.members[g_cc_member_idx];
+    mm_memset(c,0,sizeof(*c));
+    c->cls=g_cc_cls; c->race=g_cc_race;
+    mm_memcpy(c->stats,g_cc_stats,sizeof(c->stats));
+    mm_memcpy(c->stats_base,g_cc_stats,sizeof(c->stats_base));
+    c->level=1; c->hp=g_cc_hp; c->hp_max=g_cc_hp;
+    c->sp=g_cc_sp; c->sp_max=g_cc_sp; c->ac=0; c->slot=g_cc_member_idx;
+    c->gold=(monster_roll(6)+monster_roll(6)+monster_roll(6))*10;
+    /* Name: CLSRACENUM e.g. KNIGHTHUM1 */
+    const char *cn=CLS_NM[g_cc_cls]; int ni=0;
+    while(*cn&&ni<6) c->name[ni++]=(char)*cn++;
+    const char *rn=RACE_NM[g_cc_race]; while(*rn&&ni<9) c->name[ni++]=(char)*rn++;
+    c->name[ni++]=(char)('1'+g_cc_member_idx); c->name[ni]='\0';
+    g_cc_party.count++;
+    g_cc_member_idx++;
+    g_cc_phase=0; g_cc_cls=0; g_cc_race=0;
+}
+
+static void mm_enter_char_create(void)
+{
+    mm_memset(&g_cc_party,0,sizeof(g_cc_party));
+    g_cc_member_idx=0; g_cc_phase=0; g_cc_cls=0; g_cc_race=0;
+    g_mode=GM_CHAR_CREATE; g_needs_redraw=true;
+}
+
+/* ---- Save slot screen ---- */
+static void draw_save_slot_screen(void)
+{
+    int i; uint16_t r;
+    for(r=0;r<RENDER_H;r++) mm_memset(&g_render_buf[r*RENDER_W],0,RENDER_W);
+    const char *hdr=g_save_slot_mode?"LOAD GAME":"SAVE GAME";
+    {int tw=font_str_width(hdr,2);font_print(g_render_buf,RENDER_W,hdr,(RENDER_W-tw)/2,10,14,2);}
+    for(i=0;i<3;i++){
+        int y=60+i*50;
+        bool sel=(i==g_save_slot_cursor);
+        if(sel){int hy;for(hy=y-2;hy<y+12;hy++) mm_memset(&g_render_buf[hy*RENDER_W+20],1,RENDER_W-40);}
+        char line[60];
+        if(g_slot_info[i].exists){
+            const char *mn=map_display_name(g_slot_info[i].map_idx);
+            mm_snprintf(line,sizeof(line),"SLOT %d: %s",i+1,mn?mn:"Unknown");
+        } else {
+            mm_snprintf(line,sizeof(line),"SLOT %d: EMPTY",i+1);
+        }
+        font_print(g_render_buf,RENDER_W,line,30,y,sel?14:(g_slot_info[i].exists?7:8),1);
+    }
+    font_print(g_render_buf,RENDER_W,"[1-3]/UP-DN+ENTER to select  [ESC] cancel",
+               20,RENDER_H-12,8,1);
+}
+
+/* ---- Character creation screen ---- */
+static void draw_char_create_screen(void)
+{
+    static const char *CLS_ROWS[7]={"","1.Knight  ","2.Paladin ","3.Archer  ",
+                                     "4.Cleric  ","5.Sorcerer","6.Robber  "};
+    static const char *RCE_ROWS[6]={"","1.Human   ","2.Elf     ","3.Dwarf   ",
+                                     "4.Gnome   ","5.Half-Orc"};
+    static const char *SNM[7]={"INT","MIG","PER","END","SPD","ACC","LCK"};
+    int i; uint16_t r;
+    for(r=0;r<RENDER_H;r++) mm_memset(&g_render_buf[r*RENDER_W],0,RENDER_W);
+    {const char *h="CREATE YOUR PARTY";int tw=font_str_width(h,2);
+     font_print(g_render_buf,RENDER_W,h,(RENDER_W-tw)/2,4,14,2);}
+
+    /* Party so far (left column) */
+    if(g_cc_party.count>0){
+        font_print(g_render_buf,RENDER_W,"Party:",4,26,11,1);
+        for(i=0;i<g_cc_party.count;i++){
+            char ml[24]; mm_snprintf(ml,sizeof(ml),"%d. %s",i+1,g_cc_party.members[i].name);
+            font_print(g_render_buf,RENDER_W,ml,4,36+i*10,7,1);
+        }
+    }
+
+    /* Right column — current step */
+    int mx=RENDER_W/2, base_y=24;
+    if(g_cc_member_idx>=MAX_PARTY){
+        font_print(g_render_buf,RENDER_W,"PARTY COMPLETE!",mx,base_y,10,1);
+        font_print(g_render_buf,RENDER_W,"[ENTER] Begin Adventure",mx,base_y+16,14,1);
+    } else {
+        char mhdr[30]; mm_snprintf(mhdr,sizeof(mhdr),"Member %d of 6:",g_cc_member_idx+1);
+        font_print(g_render_buf,RENDER_W,mhdr,mx,base_y,11,1);
+        if(g_cc_phase==0){
+            font_print(g_render_buf,RENDER_W,"SELECT CLASS:",mx,base_y+14,15,1);
+            for(i=1;i<=6;i++)
+                font_print(g_render_buf,RENDER_W,CLS_ROWS[i],mx,base_y+24+i*10,
+                           i==g_cc_cls?14:7,1);
+        } else if(g_cc_phase==1){
+            char cl[24]; mm_snprintf(cl,sizeof(cl),"Class: %s",CLS_ROWS[g_cc_cls]);
+            font_print(g_render_buf,RENDER_W,cl,mx,base_y+14,7,1);
+            font_print(g_render_buf,RENDER_W,"SELECT RACE:",mx,base_y+26,15,1);
+            for(i=1;i<=5;i++)
+                font_print(g_render_buf,RENDER_W,RCE_ROWS[i],mx,base_y+36+i*10,
+                           i==g_cc_race?14:7,1);
+        } else {
+            char cl[40]; mm_snprintf(cl,sizeof(cl),"%s / %s",CLS_ROWS[g_cc_cls],RCE_ROWS[g_cc_race]);
+            font_print(g_render_buf,RENDER_W,cl,mx,base_y+12,7,1);
+            for(i=0;i<7;i++){
+                char sl[14]; mm_snprintf(sl,sizeof(sl),"%s:%2d",SNM[i],g_cc_stats[i]);
+                font_print(g_render_buf,RENDER_W,sl,mx+(i>=4?100:0),base_y+24+(i<4?i:i-4)*10,11,1);
+            }
+            char hs[16]; mm_snprintf(hs,sizeof(hs),"HP:%d  SP:%d",g_cc_hp,g_cc_sp);
+            font_print(g_render_buf,RENDER_W,hs,mx,base_y+68,2,1);
+            font_print(g_render_buf,RENDER_W,"[ENTER] Accept   [R] Reroll",mx,base_y+80,14,1);
+        }
+    }
+    if(g_cc_party.count>=1)
+        font_print(g_render_buf,RENDER_W,"[D] Done/Start  [ESC] Cancel",4,RENDER_H-12,8,1);
+    else
+        font_print(g_render_buf,RENDER_W,"Need at least 1 member.  [ESC] Cancel",4,RENDER_H-12,8,1);
+}
+
 /* ---- Rendering ---- */
 void mm_port_draw(void){
     int16_t cx,cy,cw,ch,bx,by,bw,bh;
@@ -1153,6 +1358,12 @@ void mm_port_draw(void){
     } else if(g_mode==GM_COMBAT_ITEM){
         draw_combat_item_screen();
         blit_opaque_pixels(cx,cy,g_render_buf,RENDER_W,0,0,RENDER_W,RENDER_H,1);
+    } else if(g_mode==GM_SAVE_SLOT){
+        draw_save_slot_screen();
+        blit_opaque_pixels(cx,cy,g_render_buf,RENDER_W,0,0,RENDER_W,RENDER_H,1);
+    } else if(g_mode==GM_CHAR_CREATE){
+        draw_char_create_screen();
+        blit_opaque_pixels(cx,cy,g_render_buf,RENDER_W,0,0,RENDER_W,RENDER_H,1);
     } else if(g_game_ready){
         const struct Map *m=&g_maps[g_gs.map_idx];
         int outdoor=(g_gs.map_idx>=14&&g_gs.map_idx<=33);
@@ -1211,7 +1422,14 @@ bool mm_port_update(void){
         (g_mode==GM_TITLE||g_mode==GM_EXPLORE||g_mode==GM_COMBAT))
         music_start(MM_TITLE, MM_TITLE_LEN);
 
-    if (g_mode == GM_TITLE) return true;
+    if (g_mode == GM_TITLE) {
+        if (g_title_next_change == 0) g_title_next_change = now + 4000;
+        if (now >= g_title_next_change) {
+            g_title_idx = (g_title_idx + 1) % 10;
+            g_title_next_change = now + 4000;
+        }
+        return true;
+    }
     if (g_mode==GM_EXPLORE&&g_game_ready&&g_gs.player.msg_ticks>0){
         player_tick(&g_gs.player); return true;
     }
@@ -1273,7 +1491,9 @@ static void do_combat_key(uint8_t sc){
         bool ended=combat_round_targeted(&g_combat,&g_gs,tgt);
         if(g_combat.n_hits_dealt>0) sfx_play(MM_HIT,MM_HIT_LEN);
         g_needs_redraw=true;
-        if(ended&&g_combat.result==CR_DEFEAT){ g_mode=GM_DEFEAT; }
+        if(ended&&g_combat.result==CR_DEFEAT){
+            g_mode=GM_DEFEAT; sfx_play(MM_DEFEAT,MM_DEFEAT_LEN);
+        }
     } else if(sc==0x21){ combat_flee(&g_combat,&g_gs); g_needs_redraw=true; }
     else if(sc==0x1F){ /* S: open spell menu */
         extern int spells_for_class_level(int,int,int*,int);
@@ -1302,6 +1522,38 @@ static void do_combat_key(uint8_t sc){
         mm_collect_combat_items();
         if(g_citem_count>0){ g_mode=GM_COMBAT_ITEM; g_needs_redraw=true; }
         else player_set_message(&g_gs.player,"NO USABLE ITEMS.",60);
+    } else if(sc==0x22){ /* G: offer gold bribe */
+        extern int monster_roll(int);
+        int gi3=0; while(gi3<g_combat.n_groups&&!g_combat.groups[gi3].alive) gi3++;
+        if(gi3<g_combat.n_groups){
+            int cost=g_combat.groups[gi3].type->level*10+5;
+            if(g_gs.party.count>0&&(int)g_gs.party.members[0].gold>=cost){
+                g_gs.party.members[0].gold-=(uint32_t)cost;
+                int lck=0,pi3;
+                for(pi3=0;pi3<g_gs.party.count;pi3++)
+                    if(!IS_DEADLIKE(g_gs.party.members[pi3].condition)&&
+                       g_gs.party.members[pi3].stats[6]>lck)
+                        lck=g_gs.party.members[pi3].stats[6];
+                int lmod=(lck-10)/2; if(lmod<0)lmod=0;
+                if(monster_roll(20)+lmod>=12){
+                    combat_flee(&g_combat,&g_gs);
+                    player_set_message(&g_gs.player,"BRIBED! MONSTERS FLEE.",90);
+                } else {
+                    player_set_message(&g_gs.player,"BRIBE FAILED! ATTACK!",90);
+                }
+            } else {
+                char bmsg[32]; int bi=0;
+                const char *bp="NEED "; while(*bp) bmsg[bi++]=(char)*bp++;
+                int cv2=g_combat.groups[gi3].type->level*10+5;
+                if(cv2>=100) bmsg[bi++]=(char)('0'+cv2/100);
+                if(cv2>=10)  bmsg[bi++]=(char)('0'+(cv2/10)%10);
+                bmsg[bi++]=(char)('0'+cv2%10);
+                const char *bq="g TO BRIBE."; while(*bq) bmsg[bi++]=(char)*bq++;
+                bmsg[bi]='\0';
+                player_set_message(&g_gs.player,bmsg,60);
+            }
+        }
+        g_needs_redraw=true;
     }
 }
 
@@ -1402,7 +1654,6 @@ bool mm_port_scancode(uint8_t sc){
         g_mode=GM_EXPLORE; g_needs_redraw=true; return true;
     }
 
-    /* Character sheet */
     if(g_mode==GM_CHARSHEET){
         if(sc==0x01||sc==0x3B){g_mode=g_prev_mode;g_needs_redraw=true;return true;}
         if(sc>=0x02&&sc<=0x07){ /* 1-6 */
@@ -1412,6 +1663,20 @@ bool mm_port_scancode(uint8_t sc){
         }
         if(sc==0xC8&&g_charsheet_idx>0){g_charsheet_idx--;g_needs_redraw=true;return true;}
         if(sc==0xD0&&g_charsheet_idx<g_gs.party.count-1){g_charsheet_idx++;g_needs_redraw=true;return true;}
+        if(sc==0x1F){ /* S: sell first equipped item of current character */
+            Character *cc=&g_gs.party.members[g_charsheet_idx];
+            int s2;
+            for(s2=0;s2<6;s2++) if(cc->equipped[s2]>0){
+                const ItemDef *it=item_get(cc->equipped[s2]);
+                int val=it?it->cost/2:0;
+                if(val>0) g_gs.party.members[0].gold+=(uint32_t)val;
+                cc->equipped[s2]=0;
+                player_set_message(&g_gs.player,"ITEM SOLD.",60);
+                g_needs_redraw=true; return true;
+            }
+            player_set_message(&g_gs.player,"NOTHING EQUIPPED TO SELL.",60);
+            g_needs_redraw=true; return true;
+        }
         return true;
     }
 
@@ -1453,6 +1718,21 @@ bool mm_port_scancode(uint8_t sc){
                 }
             }
             player_set_message(&g_gs.player,"NOTHING TO SELL.",60);
+            g_needs_redraw=true; return true;
+        }
+        if(sc==0x12){ /* E: sell first equipped item */
+            int i3e,s3e;
+            for(i3e=0;i3e<g_gs.party.count;i3e++){
+                for(s3e=0;s3e<6;s3e++) if(g_gs.party.members[i3e].equipped[s3e]>0){
+                    const ItemDef *it=item_get(g_gs.party.members[i3e].equipped[s3e]);
+                    int val=it?it->cost/2:0;
+                    if(val>0) g_gs.party.members[0].gold+=(uint32_t)val;
+                    g_gs.party.members[i3e].equipped[s3e]=0;
+                    player_set_message(&g_gs.player,"EQUIPPED ITEM SOLD.",60);
+                    g_needs_redraw=true; return true;
+                }
+            }
+            player_set_message(&g_gs.player,"NOTHING EQUIPPED TO SELL.",60);
             g_needs_redraw=true; return true;
         }
         return true;
@@ -1512,11 +1792,69 @@ bool mm_port_scancode(uint8_t sc){
         }
         return true;
     }
+    /* Save slot picker */
+    if(g_mode==GM_SAVE_SLOT){
+        if(sc==0x01){ g_mode=g_prev_mode; g_needs_redraw=true; return true; }
+        if(sc==0xC8&&g_save_slot_cursor>0){g_save_slot_cursor--;g_needs_redraw=true;return true;}
+        if(sc==0xD0&&g_save_slot_cursor<2){g_save_slot_cursor++;g_needs_redraw=true;return true;}
+        if(sc>=0x02&&sc<=0x04){ g_save_slot_cursor=sc-0x02; sc=0x1C; } /* 1-3 → select */
+        if(sc==0x1C||sc==0x39){
+            if(g_save_slot_mode==0){
+                mm_save_game_slot(g_save_slot_cursor);
+            } else {
+                if(g_slot_info[g_save_slot_cursor].exists){
+                    mm_load_game_slot(g_save_slot_cursor);
+                    g_mode=g_prev_mode;
+                } else {
+                    player_set_message(&g_gs.player,"SLOT IS EMPTY.",60);
+                }
+            }
+            if(g_mode==GM_SAVE_SLOT) g_mode=g_prev_mode;
+            g_needs_redraw=true; return true;
+        }
+        return true;
+    }
+    /* Character creation */
+    if(g_mode==GM_CHAR_CREATE){
+        if(sc==0x01){ g_mode=GM_TOWN_SELECT; g_needs_redraw=true; return true; }
+        if(sc==0x20&&g_cc_party.count>=1){ /* D: done */
+            extern void game_state_set_town(GameState*,int);
+            g_gs.party=g_cc_party; g_gs.party.shared_food=10;
+            game_state_set_town(&g_gs,0);
+            mm_load_ovr_for_map(g_gs.map_idx);
+            g_mode=GM_EXPLORE; g_needs_redraw=true; return true;
+        }
+        if(g_cc_phase==0){
+            if(sc>=0x02&&sc<=0x07){
+                g_cc_cls=sc-0x01; g_cc_phase=1; g_needs_redraw=true;
+            }
+        } else if(g_cc_phase==1){
+            if(sc>=0x02&&sc<=0x06){
+                g_cc_race=sc-0x01; cc_roll_stats(); g_cc_phase=2; g_needs_redraw=true;
+            }
+        } else {
+            if(sc==0x1C||sc==0x39){ /* Enter: accept */
+                cc_accept();
+                if(g_cc_member_idx>=MAX_PARTY){
+                    extern void game_state_set_town(GameState*,int);
+                    g_gs.party=g_cc_party; g_gs.party.shared_food=10;
+                    game_state_set_town(&g_gs,0);
+                    mm_load_ovr_for_map(g_gs.map_idx);
+                    g_mode=GM_EXPLORE;
+                }
+                g_needs_redraw=true;
+            } else if(sc==0x13){ /* R: reroll */
+                cc_roll_stats(); g_needs_redraw=true;
+            }
+        }
+        return true;
+    }
     if(g_mode==GM_TOWN_SELECT){
         if(sc>=0x02&&sc<=0x06){ town_select_confirm(sc-0x01); } /* key 1→idx1, key2→idx2... */
         else if(sc==0xC8){g_town_cursor=(g_town_cursor>0)?g_town_cursor-1:5;g_needs_redraw=true;}
         else if(sc==0xD0){g_town_cursor=(g_town_cursor<5)?g_town_cursor+1:0;g_needs_redraw=true;}
         else if(sc==0x1C||sc==0x39) town_select_confirm(g_town_cursor);
+        else if(sc==0x31){ mm_enter_char_create(); } /* N: new party */
         return true;
     }
     if(g_mode==GM_COMBAT){do_combat_key(sc);return g_needs_redraw;}
@@ -1537,11 +1875,8 @@ bool mm_port_scancode(uint8_t sc){
         if(sc==0x1F){ /* S: toggle SFX */ g_sfx_en=!g_sfx_en; g_needs_redraw=true; return true; }
         if(sc==0x2E){ /* C: cheat */ g_gs.cheat_combat=!g_gs.cheat_combat; g_needs_redraw=true; return true; }
         if(sc==0x1E){ /* A: auto-search */ g_gs.auto_search=!g_gs.auto_search; g_needs_redraw=true; return true; }
-        if(sc==0x19){ /* P: save */ mm_save_game(); g_needs_redraw=true; return true; }
-        if(sc==0x26){ /* L: load */
-            if(mm_load_game()){g_mode=g_prev_mode;g_needs_redraw=true;}
-            return true;
-        }
+        if(sc==0x19){ /* P: save */ mm_enter_save_slot(0); return true; }
+        if(sc==0x26){ /* L: load */ mm_enter_save_slot(1); return true; }
         if(sc==0x10){ /* Q: quit → confirm */
             g_prev_mode=GM_OPTIONS; g_mode=GM_QUIT_CONFIRM; g_needs_redraw=true; return true;
         }
@@ -1580,6 +1915,14 @@ bool mm_port_scancode(uint8_t sc){
         int old_map=g_gs.map_idx;
         int new_map=handle_tile_event(&g_gs,&g_ovr,ovr_txt);
         if(new_map!=old_map){g_gs.map_idx=new_map;mm_load_ovr_for_map(new_map);}
+        /* Service SFX */
+        { const char *m2=g_gs.player.message;
+          if(mm_strncmp(m2,"RESTED",6)==0)         sfx_play(MM_INN,MM_INN_LEN);
+          else if(mm_strncmp(m2,"DEAD RAISED",11)==0||
+                  mm_strncmp(m2,"CONDITIONS CURED",16)==0||
+                  mm_strncmp(m2,"ERADICATED RES",14)==0||
+                  mm_strncmp(m2,"RAISED FROM",11)==0) sfx_play(MM_CHORD,MM_CHORD_LEN);
+        }
         if(g_mode==GM_EXPLORE){
             /* Also check if shop should open */
             if(mm_namecmp(g_gs.player.message,"BROWSE_SHOP")==0){
@@ -1610,8 +1953,8 @@ bool mm_port_scancode(uint8_t sc){
         player_set_message(&g_gs.player,(txt&&*txt)?txt:"Nothing found.",120);
         g_needs_redraw=true;return true;
     }
-    if(sc==0x19&&g_game_ready){ /* P: save */
-        mm_save_game();g_needs_redraw=true;return true;
+    if(sc==0x19&&g_game_ready){ /* P: save → slot picker */
+        mm_enter_save_slot(0); return true;
     }
     if(sc==0x32&&g_game_ready){ /* M: map overlay */
         g_prev_mode=g_mode; g_mode=GM_MAP; g_needs_redraw=true; return true;

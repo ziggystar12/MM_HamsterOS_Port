@@ -34,4 +34,12 @@ extern const MusicNote MM_CHORD[MM_CHORD_LEN];
 #define MM_STEP_LEN 9
 extern const MusicNote MM_STEP[MM_STEP_LEN];
 
+/* ── Defeat lament — slow descending (party fallen screen) ── */
+#define MM_DEFEAT_LEN 8
+extern const MusicNote MM_DEFEAT[MM_DEFEAT_LEN];
+
+/* ── Inn rest chord — gentle ascending (successful rest) ── */
+#define MM_INN_LEN 5
+extern const MusicNote MM_INN[MM_INN_LEN];
+
 #undef P

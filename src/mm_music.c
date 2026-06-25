@@ -66,4 +66,19 @@ const MusicNote MM_STEP[MM_STEP_LEN] = {
     P(12,0x0712)
 };
 
+/* Defeat lament — slow descending from C4 down to low C (party fallen) */
+const MusicNote MM_DEFEAT[MM_DEFEAT_LEN] = {
+    P(16,0x11d1),P(4,0),          /* C4  880ms + rest */
+    P(12,0x1540),P(4,0),          /* A3  660ms + rest */
+    P(12,0x1b40),P(4,0),          /* F3  660ms + rest */
+    P(24,0x23a2),P(8,0)           /* C3 1320ms + final rest */
+};
+
+/* Inn rest chord — gentle ascending G4→B4→C5 (successful inn rest) */
+const MusicNote MM_INN[MM_INN_LEN] = {
+    P(6,0x0be4),P(2,0),           /* G4 */
+    P(6,0x0970),P(2,0),           /* B4 */
+    P(12,0x08e8)                  /* C5 */
+};
+
 #undef P
