@@ -1,6 +1,6 @@
 # MM_HamsterOS_Port — Parity Roadmap
 
-**Build:** `code=425KB → packed=177KB` on disk, `BSS=561KB` at runtime. Compressed with zlib deflate level 9.
+**Build:** `code=435KB → packed=182KB` on disk, `BSS=563KB` at runtime. Compressed with zlib deflate level 9.
 
 ---
 
@@ -49,42 +49,35 @@
 - [x] Unlock doors U key (Robber 70%, others 20%)
 - [x] F1 Options menu (music, sounds, cheat, auto-search, save, load, quit)
 - [x] Quit confirmation modal
-- [x] Quicksave P — batched FAT writes, only flags saved on verified success
-- [x] Load saved game — Continue option updates within same session after save
+- [x] Quicksave P — slot picker (3 named slots SAVE1-3.DAT / ROSTR1-3.DTA)
+- [x] Load saved game — slot picker, map name shown per slot
 - [x] Search X, Bash B
 - [x] set_game_mode(true) — hides tray + header bar, suppresses all shell keys
 - [x] All game data in single B:/MM1/ folder (blank-b.img)
 - [x] Starting food (10 rations on new game)
 - [x] MAZEDATA.DTA + SCREEN0-9 embedded in .APP (zero startup floppy reads for read-only data)
+- [x] Character creation — dice-roll (race base + class bonus + 3d6), accept/reroll, N key on town select
+- [x] Tiered temple — Cure Conditions (50g) / Raise Dead (500g) / Resurrect Eradicated (1000g)
+- [x] Floor trap damage — pit (1d10, Levitate bypasses), poison gas, acid, stalactites
+- [x] Trapped chests — Robber disarm (level+d20 vs DC 14), 1d8 damage on fail
+- [x] Bribe monsters — G key in combat, LCK roll vs DC 12, costs monster_level×10g
+- [x] Tavern stat-boost drinks — 5g, rotating +1 to each stat in order (capped 25)
+- [x] Shrine blessings — OVR keyword detection: stat/gem/heal/cure effects applied
+- [x] Title cycling — SCREEN0-9 advance every 4 seconds
+- [x] SFX defeat lament (MM_DEFEAT on party fallen screen)
+- [x] SFX inn rest chord (MM_INN on successful rest)
+- [x] Blacksmith E key: sell from equipped slots
+- [x] Charsheet S key: sell from equipped slots
+- [x] Multiple save slots (3 slots with picker UI on P and F1→L)
+- [x] MM.ICO — sword icon generated with mkicon.py, deployed to B:/MM1/
 
 ---
 
 ## Remaining
 
-### Core Gameplay Gaps
+All planned features complete. One optional enhancement remains:
 
-- [ ] **Character creation** — new party from scratch: dice-roll stats (3d6 + race/class bonus), pick class/race, accept/reroll loop; currently new game only loads existing ROSTER.DTA
-- [ ] **Tiered temple** — Cure Conditions (50g) / Raise Dead (500g, COND_DEAD→1HP) / Resurrect Eradicated (1000g, COND_ERADICATED→1HP); currently flat 100g cure-all that ignores eradicated
-- [ ] **Floor trap damage** — `handle_floor_trap()` is a TODO stub; poison gas / acid / stalactites / cold already parsed from OVR but no HP damage or conditions are applied
-- [ ] **Pit trap + Levitate bypass** — falls under floor trap stub; check `party.protections[PROT_LEVITATE] > 0` before applying fall damage
-- [ ] **Trapped chests** — detect chest trap from OVR, Robber disarm roll (thievery vs DC 14), deal trap damage to party on failure
-- [ ] **Bribe monsters** — offer gold (monster level × 10g) during combat; monsters flee on success (LCK roll); needs a new combat key (current B=Bash is explore-only)
-- [ ] **Tavern stat-boost drinks** — 5g per drink, rotating +1 to each stat in order (INT→MIG→PER→END→SPD→ACC→LCK, capped at 25); currently tavern only shows rumour text
-- [ ] **Shrine blessings** — SVC_SHRINE shows placeholder text; parse OVR for shrine type, apply effect (stat +1, gem award, cure condition, HP restore)
-- [ ] **Title cycling** — SCREEN0-9 embedded but `g_title_idx` never advances; add 4s timer in `mm_port_update` to cycle 0→9 then loop
-
-### Polish
-
-- [ ] **SFX: defeat lament** — silence on "YOUR PARTY HAS FALLEN"; add kMM1Sound defeat sequence to mm_music.c (mirror of MM_VICTORY, slower descending tones)
-- [ ] **SFX: inn rest chord** — silence when paying for inn; play MM_CHORD on successful rest
-- [ ] **Blacksmith sell from equipped** — sell directly from equipment slots (not just backpack)
-- [ ] **Charsheet sell from equipped** — sell equipped items directly from character sheet view
 - [ ] **Game music in dungeons/overworld** — game.wav / dungeon.wav via SB16 (need WAV source files)
-
-### Release
-
-- [ ] **Multiple save slots** — 3 named slots (SAVE1.DAT / SAVE2.DAT / SAVE3.DAT), slot picker on save and load
-- [ ] **MM icon** — generate MM.ICO with `../HamsterOS/tools/mkicon.py`, copy to blank-b.img alongside MM.APP
 
 ---
 
