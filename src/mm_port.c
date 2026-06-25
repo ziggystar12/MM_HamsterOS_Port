@@ -167,6 +167,15 @@ static bool         g_ovr_loaded;
 static uint32_t     g_mm_cluster;
 static FatDrive     g_mm_drive = FAT_DRIVE_B;  /* drive where MM1/ was found */
 
+/* Called by the OS when the app is launched from a directory — gives us
+ * the exact drive and cluster so we never need to search. */
+void mm_port_open_file_at(FatDrive drive, uint32_t cluster, const char *name)
+{
+    (void)name;
+    g_mm_drive   = drive;
+    g_mm_cluster = cluster;
+}
+
 /* Title */
 static int          g_title_idx;
 static uint32_t     g_title_next_change;
@@ -234,20 +243,22 @@ static void mm_load_title_screen(int idx)
 static void mm_load_game_data(void)
 {
     uint32_t loaded_size=0; bool trunc=false;
-    /* Probe all drives for MM1/ directory (supports A:, B:, C:..H:) */
-    { int di;
-      g_mm_cluster = 0;
-      for(di=0;di<(int)FAT_DRIVE_CDROM&&!g_mm_cluster;di++){
-          uint32_t cl=0;
-          if(mm_find_subdir((FatDrive)di,0,"MM1",&cl)){
-              g_mm_drive=(FatDrive)di; g_mm_cluster=cl;
-              serial_str("MM: MM1/ on drive ");
-              serial_dec16((int16_t)di);
-              serial_str("\n");
-          }
-      }
-      if(!g_mm_cluster){ serial_str("MM: MM1/ not found\n"); return; }
+    /* g_mm_drive and g_mm_cluster set by open_file_at (launch directory).
+     * Fallback: if not set (debug launch without context), probe all drives. */
+    if(!g_mm_cluster){
+        int di;
+        for(di=0;di<(int)FAT_DRIVE_CDROM&&!g_mm_cluster;di++){
+            uint32_t cl=0;
+            if(mm_find_subdir((FatDrive)di,0,"MM1",&cl)){
+                g_mm_drive=(FatDrive)di; g_mm_cluster=cl;
+                serial_str("MM: fallback MM1/ on drive ");
+                serial_dec16((int16_t)di); serial_str("\n");
+            }
+        }
+        if(!g_mm_cluster){ serial_str("MM: no data dir\n"); return; }
     }
+    serial_str("MM: drive="); serial_dec16((int16_t)g_mm_drive);
+    serial_str(" cluster="); serial_dec16((int16_t)g_mm_cluster); serial_str("\n");
 
     g_maps_loaded=mazedata_load(g_maps,mazedata_dta_data,mazedata_dta_size);
     serial_str("MM: maps=");serial_dec16((int16_t)g_maps_loaded);serial_str("\n");
