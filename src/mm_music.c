@@ -44,27 +44,22 @@ const MusicNote MM_VICTORY[MM_VICTORY_LEN] = {
     P(12,0x08e8)
 };
 
-/* kMM1Sound1 — wall bump / blocked (5 entries) */
-const MusicNote MM_BUMP[MM_BUMP_LEN] = {
-    P(2,0x0be4),P(4,0),P(1,0x08e8),P(1,0),P(8,0x05f2)
-};
+/* kMM1Sound1 — wall bump / blocked: single 180 Hz, 80ms */
+const MusicNote MM_BUMP[MM_BUMP_LEN] = { {180, 80} };
 
-/* kMM1Sound6 — hit beep (1 entry) */
-const MusicNote MM_HIT[MM_HIT_LEN] = {
-    P(6,0x03e8)
-};
+/* hit landed: single 220 Hz, 120ms */
+const MusicNote MM_HIT[MM_HIT_LEN] = { {220, 120} };
+
+/* monster slain: single 440 Hz, 180ms */
+const MusicNote MM_KILL[MM_KILL_LEN] = { {440, 180} };
 
 /* kMM1Sound8 — chord: level-up / item find (6 entries) */
 const MusicNote MM_CHORD[MM_CHORD_LEN] = {
     P(8,0x0b3a),P(8,0x0be4),P(8,0x0c98),P(8,0x0be4),P(2,0),P(16,0x0d59)
 };
 
-/* kMM1Sound9 — staccato step (9 entries) */
-const MusicNote MM_STEP[MM_STEP_LEN] = {
-    P(5,0x08e8),P(1,0),P(1,0x07ef),P(1,0),
-    P(1,0x0be4),P(1,0),P(1,0x07ef),P(1,0),
-    P(12,0x0712)
-};
+/* footstep: single low 120 Hz, 40ms blip (NOT a tune) */
+const MusicNote MM_STEP[MM_STEP_LEN] = { {120, 40} };
 
 /* Defeat lament — slow descending from C4 down to low C (party fallen) */
 const MusicNote MM_DEFEAT[MM_DEFEAT_LEN] = {

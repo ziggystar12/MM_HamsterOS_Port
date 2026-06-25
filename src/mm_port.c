@@ -170,6 +170,7 @@ static FatDrive     g_mm_drive = FAT_DRIVE_B;  /* drive where MM1/ was found */
 /* Called by the OS when the app is launched from a directory — gives us
  * the exact drive and cluster so we never need to search.
  * open_file_at IS the open handler for file-associated launches (open() is not called). */
+void mm_port_open(void);  /* fwd decl — defined below in lifecycle section */
 void mm_port_open_file_at(FatDrive drive, uint32_t cluster, const char *name)
 {
     (void)name;
@@ -439,7 +440,9 @@ static void mm_enter_save_slot(int mode)
             g_slot_info[ss2].map_idx=sst.map_idx;
         }
     }
-    g_prev_mode=g_mode; g_mode=GM_SAVE_SLOT; g_needs_redraw=true;
+    /* NOTE: do not clobber g_prev_mode — save/load always return to EXPLORE.
+     * (Options menu owns g_prev_mode for its own ESC return path.) */
+    g_mode=GM_SAVE_SLOT; g_needs_redraw=true;
 }
 
 /* ---- Start combat ---- */
@@ -1702,7 +1705,7 @@ static void do_combat_key(uint8_t sc){
         else if(sc==0x2E&&g_combat.n_groups>2) tgt=2;
         g_combat.target_group=tgt;
         bool ended=combat_round_targeted(&g_combat,&g_gs,tgt);
-        if(g_combat.n_hits_dealt>=10) sfx_play(MM_STEP,MM_STEP_LEN);  /* kill sound */
+        if(g_combat.n_hits_dealt>=10) sfx_play(MM_KILL,MM_KILL_LEN);  /* kill sound */
         else if(g_combat.n_hits_dealt>0) sfx_play(MM_HIT,MM_HIT_LEN); /* hit sound */
         g_needs_redraw=true;
         if(ended&&g_combat.result==CR_DEFEAT){
@@ -2068,22 +2071,23 @@ bool mm_port_scancode(uint8_t sc){
     }
     /* Save slot picker */
     if(g_mode==GM_SAVE_SLOT){
-        if(sc==0x01){ g_mode=g_prev_mode; g_needs_redraw=true; return true; }
+        if(sc==0x01){ g_mode=GM_EXPLORE; g_needs_redraw=true; return true; }
         if(sc==0xC8&&g_save_slot_cursor>0){g_save_slot_cursor--;g_needs_redraw=true;return true;}
         if(sc==0xD0&&g_save_slot_cursor<2){g_save_slot_cursor++;g_needs_redraw=true;return true;}
         if(sc>=0x02&&sc<=0x04){ g_save_slot_cursor=sc-0x02; sc=0x1C; } /* 1-3 → select */
         if(sc==0x1C||sc==0x39){
             if(g_save_slot_mode==0){
                 mm_save_game_slot(g_save_slot_cursor);
+                g_mode=GM_EXPLORE;
             } else {
                 if(g_slot_info[g_save_slot_cursor].exists){
                     mm_load_game_slot(g_save_slot_cursor);
-                    g_mode=g_prev_mode;
+                    g_mode=GM_EXPLORE;
                 } else {
                     player_set_message(&g_gs.player,"SLOT IS EMPTY.",60);
+                    /* stay in picker so they can choose another slot */
                 }
             }
-            if(g_mode==GM_SAVE_SLOT) g_mode=g_prev_mode;
             g_needs_redraw=true; return true;
         }
         return true;

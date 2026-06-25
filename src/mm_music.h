@@ -18,21 +18,26 @@ extern const MusicNote MM_TITLE[MM_TITLE_LEN];
 #define MM_VICTORY_LEN 49
 extern const MusicNote MM_VICTORY[MM_VICTORY_LEN];
 
-/* ── kMM1Sound1 — wall bump / blocked ── */
-#define MM_BUMP_LEN 5
+/* ── Simple single-beep SFX (match MM_C_Port audio.c) ── */
+/* wall bump / blocked — 180 Hz, 80ms */
+#define MM_BUMP_LEN 1
 extern const MusicNote MM_BUMP[MM_BUMP_LEN];
 
-/* ── kMM1Sound6 — hit / spell result (single high beep) ── */
+/* hit landed — 220 Hz, 120ms */
 #define MM_HIT_LEN 1
 extern const MusicNote MM_HIT[MM_HIT_LEN];
+
+/* monster slain — 440 Hz, 180ms */
+#define MM_KILL_LEN 1
+extern const MusicNote MM_KILL[MM_KILL_LEN];
+
+/* footstep — single low 120 Hz, 40ms blip (NOT a tune) */
+#define MM_STEP_LEN 1
+extern const MusicNote MM_STEP[MM_STEP_LEN];
 
 /* ── kMM1Sound8 — chord (level-up / item found) ── */
 #define MM_CHORD_LEN 6
 extern const MusicNote MM_CHORD[MM_CHORD_LEN];
-
-/* ── kMM1Sound9 — staccato (step / search) ── */
-#define MM_STEP_LEN 9
-extern const MusicNote MM_STEP[MM_STEP_LEN];
 
 /* ── Defeat lament — slow descending (party fallen screen) ── */
 #define MM_DEFEAT_LEN 8
