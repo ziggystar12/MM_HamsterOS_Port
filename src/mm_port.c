@@ -165,6 +165,7 @@ static bool         g_save_exists;
 static OvrFile      g_ovr;
 static bool         g_ovr_loaded;
 static uint32_t     g_mm_cluster;
+static FatDrive     g_mm_drive = FAT_DRIVE_B;  /* drive where MM1/ was found */
 
 /* Title */
 static int          g_title_idx;
@@ -218,7 +219,7 @@ static void mm_load_ovr_for_map(int map_idx)
     fname[i++]='.';fname[i++]='O';fname[i++]='V';fname[i++]='R';fname[i]='\0';
     uint8_t *buf=(uint8_t*)heap_alloc(4096); if(!buf){g_ovr_loaded=false;return;}
     uint32_t sz=0; bool trunc=false;
-    if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,fname,(char*)buf,4096,&sz,&trunc)){
+    if(fat_load_file(g_mm_drive,g_mm_cluster,fname,(char*)buf,4096,&sz,&trunc)){
         ovr_load_buf(&g_ovr,buf,sz);g_ovr_loaded=true;
     } else {g_ovr_loaded=false;mm_memset(&g_ovr,0,sizeof(g_ovr));}
     heap_free(buf);
@@ -233,8 +234,19 @@ static void mm_load_title_screen(int idx)
 static void mm_load_game_data(void)
 {
     uint32_t loaded_size=0; bool trunc=false;
-    if(!mm_find_subdir(FAT_DRIVE_B,0,"MM1",&g_mm_cluster)){
-        serial_str("MM: no MM1/ on B:\n"); return;
+    /* Probe all drives for MM1/ directory (supports A:, B:, C:..H:) */
+    { int di;
+      g_mm_cluster = 0;
+      for(di=0;di<(int)FAT_DRIVE_CDROM&&!g_mm_cluster;di++){
+          uint32_t cl=0;
+          if(mm_find_subdir((FatDrive)di,0,"MM1",&cl)){
+              g_mm_drive=(FatDrive)di; g_mm_cluster=cl;
+              serial_str("MM: MM1/ on drive ");
+              serial_dec16((int16_t)di);
+              serial_str("\n");
+          }
+      }
+      if(!g_mm_cluster){ serial_str("MM: MM1/ not found\n"); return; }
     }
 
     g_maps_loaded=mazedata_load(g_maps,mazedata_dta_data,mazedata_dta_size);
@@ -253,7 +265,7 @@ static void mm_load_game_data(void)
         uint8_t *rbuf=(uint8_t*)heap_alloc(4096);
         if(rbuf){
             uint32_t rsz=0;bool rt=false;
-            if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,"ROSTER.DTA",
+            if(fat_load_file(g_mm_drive,g_mm_cluster,"ROSTER.DTA",
                              (char*)rbuf,4096,&rsz,&rt))
                 roster_load_buf(rbuf,rsz,&g_gs.party);
             heap_free(rbuf);
@@ -271,7 +283,7 @@ static void mm_load_game_data(void)
         int ss2; g_save_exists=false;
         for(ss2=0;ss2<3;ss2++){
             uint8_t stest[8]; uint32_t ssz=0; bool st=false;
-            if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,SAVE_FNAMES[ss2],
+            if(fat_load_file(g_mm_drive,g_mm_cluster,SAVE_FNAMES[ss2],
                              (char*)stest,8,&ssz,&st) && ssz>=8)
                 { g_save_exists=true; break; }
         }
@@ -334,12 +346,12 @@ static void mm_save_game_slot(int slot)
     static uint8_t raw[18*127+18];
     mm_build_roster_raw(raw);
 
-    fat_batch_begin(FAT_DRIVE_B);
-    bool ok1=fat_save_file(FAT_DRIVE_B,g_mm_cluster,SAVE_FNAMES[slot],
+    fat_batch_begin(g_mm_drive);
+    bool ok1=fat_save_file(g_mm_drive,g_mm_cluster,SAVE_FNAMES[slot],
                             (const char*)&ss,sizeof(ss));
-    bool ok2=fat_save_file(FAT_DRIVE_B,g_mm_cluster,ROSTR_FNAMES[slot],
+    bool ok2=fat_save_file(g_mm_drive,g_mm_cluster,ROSTR_FNAMES[slot],
                             (const char*)raw,sizeof(raw));
-    fat_batch_end(FAT_DRIVE_B);
+    fat_batch_end(g_mm_drive);
 
     if(ok1&&ok2){
         g_save_exists=true;
@@ -355,14 +367,14 @@ static bool mm_load_game_slot(int slot)
 {
     if(slot<0||slot>2) return false;
     SaveState ss; uint32_t ssz=0; bool st=false;
-    if(!fat_load_file(FAT_DRIVE_B,g_mm_cluster,SAVE_FNAMES[slot],
+    if(!fat_load_file(g_mm_drive,g_mm_cluster,SAVE_FNAMES[slot],
                       (char*)&ss,sizeof(ss),&ssz,&st)) return false;
     if(ssz<sizeof(ss)||ss.magic!=SAVE_MAGIC) return false;
 
     uint8_t *rbuf=(uint8_t*)heap_alloc(4096);
     if(rbuf){
         uint32_t rsz=0; bool rt=false;
-        if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,ROSTR_FNAMES[slot],
+        if(fat_load_file(g_mm_drive,g_mm_cluster,ROSTR_FNAMES[slot],
                          (char*)rbuf,4096,&rsz,&rt))
             roster_load_buf(rbuf,rsz,&g_gs.party);
         heap_free(rbuf);
@@ -407,7 +419,7 @@ static void mm_enter_save_slot(int mode)
         g_slot_info[ss2].exists=false;
         g_slot_info[ss2].map_idx=0;
         SaveState sst; uint32_t ssz=0; bool st2=false;
-        if(fat_load_file(FAT_DRIVE_B,g_mm_cluster,SAVE_FNAMES[ss2],
+        if(fat_load_file(g_mm_drive,g_mm_cluster,SAVE_FNAMES[ss2],
                          (char*)&sst,sizeof(sst),&ssz,&st2)
            && ssz>=sizeof(sst) && sst.magic==SAVE_MAGIC){
             g_slot_info[ss2].exists=true;
@@ -599,21 +611,18 @@ static void draw_combat_screen(void){
         font_print(g_render_buf,RENDER_W,g_combat.log[li],RENDER_W/2,54+i*9,7,1);
     }
 
-    /* Party HP — two columns of 3, right panel */
+    /* Party HP — below the 3D view (y>264), three per row */
     for(i=0;i<g_gs.party.count&&i<6;i++){
         Character *c=&g_gs.party.members[i];
-        char line[32]; int li=0;
-        const char *nm=c->name; while(*nm&&li<8) line[li++]=*nm++;
-        while(li<8) line[li++]=' ';
+        char line[24]; int li=0;
+        const char *nm=c->name; while(*nm&&li<7) line[li++]=*nm++;
+        while(li<7) line[li++]=' ';
         line[li++]=' ';
         if(c->hp>=100) line[li++]=(char)('0'+c->hp/100);
         if(c->hp>=10)  line[li++]=(char)('0'+(c->hp/10)%10);
         line[li++]=(char)('0'+c->hp%10); line[li]='\0';
-        uint8_t col=IS_DEADLIKE(c->condition)?8:(c->hp<=0?4:2);
-        /* Two columns of 3 in right panel (x=480+) */
-        int col_x = (i<3) ? RENDER_W/2 : RENDER_W/2+80;
-        int row_y = 160 + (i<3?i:i-3)*10;
-        font_print(g_render_buf,RENDER_W,line,col_x,row_y,col,1);
+        uint8_t col=IS_DEADLIKE(c->condition)?8:(c->hp<=0?4:(c->condition?14:2));
+        font_print(g_render_buf,RENDER_W,line,(i%3)*(RENDER_W/3),272+(i/3)*10,col,1);
     }
 
     const char *prompt=g_combat.over?"ENTER to continue":
@@ -1626,7 +1635,7 @@ bool mm_port_update(void){
 
 /* ---- Title / town select helpers ---- */
 static void title_exit(void){
-    speaker_note_off(); g_sfx_seq=NULL; g_mus_idx=0;
+    speaker_note_off(); g_sfx_seq=NULL; g_mus_seq=NULL; g_mus_idx=0;
     g_title_idx=-1;
     g_town_cursor=0;  /* always start at 0 — Continue is always option 0 */
     g_mode=GM_TOWN_SELECT; g_needs_redraw=true;
@@ -1651,7 +1660,7 @@ static void do_combat_key(uint8_t sc){
     if(g_combat.over){
         if(sc==0x1C||sc==0x39||sc==0x3B){
             if(g_combat.result==CR_VICTORY){
-                sfx_play(MM_VICTORY,MM_VICTORY_LEN);
+                sfx_play(MM_STEP,MM_STEP_LEN);   /* "ta-dah" on victory */
                 combat_reward(&g_combat,&g_gs);
                 combat_loot(&g_combat,&g_gs);
                 if(g_combat.n_found_items>0){
@@ -1779,9 +1788,6 @@ static void do_move(uint8_t sc){
         default: return;
     }
     if(!moved){ sfx_play(MM_BUMP,MM_BUMP_LEN); g_needs_redraw=true;return; }
-    /* step sound for forward/back/strafe, not turns */
-    if(sc==0x11||sc==0xC8||sc==0x1F||sc==0xD0||sc==0x20||sc==0x1E)
-        sfx_play(MM_STEP,MM_STEP_LEN);
 
     if(g_ovr_loaded){
         const char *ovr_txt=ovr_text_at(&g_ovr,g_gs.player.x,g_gs.player.y,g_gs.player.facing);
