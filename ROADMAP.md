@@ -53,7 +53,7 @@
 - [x] Load saved game — slot picker, map name shown per slot
 - [x] Search X, Bash B
 - [x] set_game_mode(true) — hides tray + header bar, suppresses all shell keys
-- [x] All game data in single B:/MM1/ folder (blank-b.img)
+- [x] All game data in single B:/MM1/ folder (mm1.img)
 - [x] Starting food (10 rations on new game)
 - [x] MAZEDATA.DTA + SCREEN0-9 embedded in .APP (zero startup floppy reads for read-only data)
 - [x] Character creation — dice-roll (race base + class bonus + 3d6), accept/reroll, N key on town select
@@ -84,8 +84,6 @@ All planned features complete.
 - **Floppy writes (P to save)** take 1–3 seconds — QEMU simulates real floppy timing. Batch mode minimises seeks; expect a brief pause.
 - **OVR tavern rumours** quality varies by map — shows first string ≥12 chars from the OVR data.
 - **Characters start with 10 food rations** — buy more at food shops (5g = 3 rations).
-- **Floor traps** show OVR text but deal no damage yet (stub) — do not venture into pit areas without Levitate until implemented.
-- **Eradicated characters** (condition 0xFF) cannot be revived until tiered temple is implemented.
 
 ---
 
@@ -97,11 +95,11 @@ $p = "e:\OneDrive\Mean Hamster Group\New Mean Hamster"
 # Build
 docker compose -f "$p\HamsterOS\compose.yaml" run --rm -v "${p}:/parent" builder bash -c 'cd /parent/MM/MM_HamsterOS_Port && make all HAMSTEROS_DIR=/parent/HamsterOS MMDATA_DIR=/parent/MM/Original_Source 2>&1'
 
-# Deploy to game disk (blank-b.img) — MM.APP lives here alongside OVR/save files
-docker compose -f "$p\HamsterOS\compose.yaml" run --rm -v "${p}:/parent" builder bash -c 'mdel -i /work/build/blank-b.img ::MM1/MM.APP 2>/dev/null; mcopy -i /work/build/blank-b.img /parent/MM/MM_HamsterOS_Port/dist/MM.APP ::MM1/MM.APP'
+# Deploy to game disk (mm1.img) — MM.APP lives here alongside OVR/save files
+docker compose -f "$p\HamsterOS\compose.yaml" run --rm -v "${p}:/parent" builder bash -c 'mdel -i /work/build/mm1.img ::MM1/MM.APP 2>/dev/null; mcopy -i /work/build/mm1.img /parent/MM/MM_HamsterOS_Port/dist/MM.APP ::MM1/MM.APP'
 ```
 
-**Disk layout (`blank-b.img` = B: drive in QEMU):**
+**Disk layout (`mm1.img` = B: drive in QEMU):**
 
 ```text
 B:/MM1/
