@@ -75,9 +75,7 @@
 
 ## Remaining
 
-All planned features complete. One optional enhancement remains:
-
-- [ ] **Game music in dungeons/overworld** — game.wav / dungeon.wav via SB16 (need WAV source files)
+All planned features complete.
 
 ---
 
