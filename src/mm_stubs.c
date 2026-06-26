@@ -77,7 +77,7 @@ void serial_str(const char *s)   { g_host->serial_str(s); }
 void serial_dec16(int16_t v)     { g_host->serial_dec16(v); }
 void serial_char(char c)         { g_host->serial_char(c); }
 
-/* FAT directory listing — used to find C:/DOS/MM/ cluster */
+/* FAT directory listing — used to validate the launch-folder asset base. */
 bool mm_fat_list_dir(FatDrive drive, uint32_t dir, FatRootEntry *entries,
                      uint32_t max, uint32_t start, uint32_t *count,
                      bool *more, const char *ext_filter)

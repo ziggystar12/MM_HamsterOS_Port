@@ -12,6 +12,7 @@ if errorlevel 1 (
 )
 
 echo Building MM.APP...
+if not defined MM_DEPLOY_PATH set "MM_DEPLOY_PATH=MM1/MM.APP"
 docker compose -f ..\..\HamsterOS\compose.yaml run --rm ^
     -v "%CD%:/parent/MM/MM_HamsterOS_Port" ^
     -v "%CD%\..\Original_Source:/parent/MM/Original_Source:ro" ^
@@ -23,9 +24,9 @@ if not errorlevel 1 (
     if exist "..\..\HamsterOS\build\mm1.img" (
         docker compose -f ..\..\HamsterOS\compose.yaml run --rm ^
             -v "%CD%\dist:/parent/MM/MM_HamsterOS_Port/dist:ro" ^
-            builder sh -lc "mdel -i build/mm1.img ::/MM1/MM.APP 2>/dev/null || true; mcopy -i build/mm1.img /parent/MM/MM_HamsterOS_Port/dist/MM.APP ::/MM1/MM.APP"
+            builder sh -lc "mdel -i build/mm1.img ::/%MM_DEPLOY_PATH% 2>/dev/null || true; mcopy -i build/mm1.img /parent/MM/MM_HamsterOS_Port/dist/MM.APP ::/%MM_DEPLOY_PATH%"
         if errorlevel 1 exit /b 1
-        echo Updated ..\..\HamsterOS\build\mm1.img ::/MM1/MM.APP
+        echo Updated ..\..\HamsterOS\build\mm1.img ::/%MM_DEPLOY_PATH%
     )
 )
 exit /b %errorlevel%

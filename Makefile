@@ -114,7 +114,7 @@ $(ELF): $(ENTRY_OBJ) $(OBJS) $(HAMSTEROS_DIR)/tools/app.ld
 
 MM.APP: $(ELF) | $(DIST_DIR)
 	python3 $(HAMSTEROS_DIR)/tools/mkapp.py \
-	    --elf $(ELF) --name MM --output $(DIST_DIR)/MM.APP
+	    --elf $(ELF) --name MM --open-launch-at --output $(DIST_DIR)/MM.APP
 	@echo "MM.APP built: $(DIST_DIR)/MM.APP"
 
 clean:

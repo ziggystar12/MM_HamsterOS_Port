@@ -53,7 +53,7 @@
 - [x] Load saved game — slot picker, map name shown per slot
 - [x] Search X, Bash B
 - [x] set_game_mode(true) — hides tray + header bar, suppresses all shell keys
-- [x] All game data in single B:/MM1/ folder (mm1.img)
+- [x] All game data lives beside MM.APP in its launch folder (A:, B:, C:, root, or subdirectory)
 - [x] Starting food (10 rations on new game)
 - [x] MAZEDATA.DTA + SCREEN0-9 embedded in .APP (zero startup floppy reads for read-only data)
 - [x] Character creation — dice-roll (race base + class bonus + 3d6), accept/reroll, N key on town select
@@ -72,7 +72,7 @@
 - [x] Blacksmith E key: sell from equipped slots
 - [x] Charsheet S key: sell from equipped slots
 - [x] Multiple save slots (3 slots with picker UI on P and F1→L)
-- [x] MM.ICO — sword icon generated with mkicon.py, deployed to B:/MM1/
+- [x] MM.ICO — sword icon generated with mkicon.py, deployed beside MM.APP in the game folder
 
 ---
 
@@ -95,18 +95,19 @@ All planned features complete.
 
 ```powershell
 $p = "e:\OneDrive\Mean Hamster Group\New Mean Hamster"
+$target = "MM1/MM.APP"  # sample test-image path; MM runtime only requires files beside MM.APP
 
 # Build
 docker compose -f "$p\HamsterOS\compose.yaml" run --rm -v "${p}:/parent" builder bash -c 'cd /parent/MM/MM_HamsterOS_Port && make all HAMSTEROS_DIR=/parent/HamsterOS MMDATA_DIR=/parent/MM/Original_Source 2>&1'
 
-# Deploy to game disk (mm1.img) — MM.APP lives here alongside OVR/save files
-docker compose -f "$p\HamsterOS\compose.yaml" run --rm -v "${p}:/parent" builder bash -c 'mdel -i /work/build/mm1.img ::MM1/MM.APP 2>/dev/null; mcopy -i /work/build/mm1.img /parent/MM/MM_HamsterOS_Port/dist/MM.APP ::MM1/MM.APP'
+# Deploy to the current test game disk — choose any folder that also contains OVR/save files
+docker compose -f "$p\HamsterOS\compose.yaml" run --rm -v "${p}:/parent" builder bash -c "mdel -i /work/build/mm1.img ::/$target 2>/dev/null; mcopy -i /work/build/mm1.img /parent/MM/MM_HamsterOS_Port/dist/MM.APP ::/$target"
 ```
 
-**Disk layout (`mm1.img` = B: drive in QEMU):**
+**Portable disk layout:**
 
 ```text
-B:/MM1/
+<any FAT drive>/<any folder>/
   MM.APP          ← game binary (177 KB packed)
   *.OVR  ×55      ← area scripts (loaded per map change)
   ROSTER.DTA      ← party data (read on open, written on save)

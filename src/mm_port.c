@@ -182,17 +182,18 @@ static bool         g_save_exists;
 static OvrFile      g_ovr;
 static bool         g_ovr_loaded;
 static uint32_t     g_mm_cluster;
-static FatDrive     g_mm_drive = FAT_DRIVE_B;  /* drive where MM1/ was found */
+static FatDrive     g_mm_drive = FAT_DRIVE_INVALID;  /* launch/data drive */
+static bool         g_mm_dir_known;
 
-/* Called by the OS when the app is launched from a directory — gives us
- * the exact drive and cluster so we never need to search.
- * open_file_at IS the open handler for file-associated launches (open() is not called). */
+/* Called by the OS when the app is launched from a directory.  The drive and
+ * cluster become the asset base, then the app follows the normal open path. */
 void mm_port_open(void);  /* fwd decl — defined below in lifecycle section */
-void mm_port_open_file_at(FatDrive drive, uint32_t cluster, const char *name)
+void mm_port_open_launch_at(FatDrive drive, uint32_t cluster, const char *name)
 {
     (void)name;
     g_mm_drive   = drive;
     g_mm_cluster = cluster;
+    g_mm_dir_known = true;
     if(!g_open) mm_port_open();   /* full init — open() won't be called for file launches */
 }
 
@@ -688,14 +689,45 @@ static void rb_blit_view2x(int dx, int dy)
 }
 
 /* ---- FAT helpers ---- */
-static bool mm_find_subdir(FatDrive drive, uint32_t parent,
-                            const char *name, uint32_t *out)
+static bool mm_dir_has_file(FatDrive drive, uint32_t dir, const char *name)
 {
-    FatRootEntry entries[32]; uint32_t count=0,i; bool more=false;
-    if (!mm_fat_list_dir(drive,parent,entries,32,0,&count,&more,NULL)) return false;
-    for (i=0;i<count;i++)
-        if (entries[i].is_dir && mm_namecmp(entries[i].name,name)==0)
-            { *out=entries[i].first_cluster; return true; }
+    FatRootEntry entries[32];
+    uint32_t start=0,count=0,i;
+    bool more=false;
+    do {
+        count=0; more=false;
+        if(!mm_fat_list_dir(drive,dir,entries,32,start,&count,&more,NULL)) return false;
+        for(i=0;i<count;i++)
+            if(!entries[i].is_dir && mm_namecmp(entries[i].name,name)==0)
+                return true;
+        start += count;
+    } while(more && count>0);
+    return false;
+}
+
+static bool mm_dir_has_data(FatDrive drive, uint32_t dir)
+{
+    return mm_dir_has_file(drive,dir,"SORPIGAL.OVR");
+}
+
+static bool mm_use_data_dir(FatDrive drive, uint32_t dir)
+{
+    if(!mm_dir_has_data(drive,dir)) return false;
+    g_mm_drive=drive;
+    g_mm_cluster=dir;
+    g_mm_dir_known=true;
+    return true;
+}
+
+static bool mm_resolve_data_dir(void)
+{
+    if(g_mm_dir_known) {
+        if(mm_use_data_dir(g_mm_drive,g_mm_cluster)) return true;
+        serial_str("MM: no data in launch dir\n");
+        return false;
+    }
+
+    serial_str("MM: no launch dir\n");
     return false;
 }
 
@@ -723,19 +755,12 @@ static void mm_load_title_screen(int idx)
 static void mm_load_game_data(void)
 {
     uint32_t loaded_size=0; bool trunc=false;
-    /* g_mm_drive and g_mm_cluster set by open_file_at (launch directory).
-     * Fallback: if not set (debug launch without context), probe all drives. */
-    if(!g_mm_cluster){
-        int di;
-        for(di=0;di<(int)FAT_DRIVE_CDROM&&!g_mm_cluster;di++){
-            uint32_t cl=0;
-            if(mm_find_subdir((FatDrive)di,0,"MM1",&cl)){
-                g_mm_drive=(FatDrive)di; g_mm_cluster=cl;
-                serial_str("MM: fallback MM1/ on drive ");
-                serial_dec16((int16_t)di); serial_str("\n");
-            }
-        }
-        if(!g_mm_cluster){ serial_str("MM: no data dir\n"); return; }
+    /* Use the launch directory as the asset base.  Cluster
+     * 0 is a valid root directory, so g_mm_dir_known tracks whether launch
+     * context exists instead of treating cluster 0 as "unset". */
+    if(!mm_resolve_data_dir()){
+        serial_str("MM: no data dir\n");
+        return;
     }
     serial_str("MM: drive="); serial_dec16((int16_t)g_mm_drive);
     serial_str(" cluster="); serial_dec16((int16_t)g_mm_cluster); serial_str("\n");
@@ -941,6 +966,7 @@ void mm_port_close(void){
     if(g_monpix_buf){heap_free(g_monpix_buf);g_monpix_buf=NULL;}
     g_maps_loaded=0;g_wallpix_loaded=false;g_monpix_loaded=false;
     g_game_ready=false;g_ovr_loaded=false;g_open=false;g_active=false;
+    g_mm_drive=FAT_DRIVE_INVALID;g_mm_cluster=0;g_mm_dir_known=false;
     serial_str("MM: closed\n");
 }
 bool mm_port_is_open(void)      { return g_open; }
@@ -2222,7 +2248,7 @@ void mm_port_draw(void){
     } else {
         uint16_t rr;
         for(rr=0;rr<RENDER_H;rr++) mm_memset(&g_render_buf[rr*RENDER_W],rr<RENDER_H/2?1:2,RENDER_W);
-        font_print(g_render_buf,RENDER_W,"Loading B:/MM1/...",4,RENDER_H/2,8,1);
+        font_print(g_render_buf,RENDER_W,"Loading game data...",4,RENDER_H/2,8,1);
         blit_opaque_pixels(cx,cy,g_render_buf,RENDER_W,0,0,RENDER_W,RENDER_H,1);
     }
 

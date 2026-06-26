@@ -4,7 +4,7 @@
 
 A HamsterOS external `.APP` port of the Might and Magic I C engine from
 `../MM_C_Port/`. The goal: a playable MM1 `.APP` that runs on HamsterOS,
-loads game data from the hard disk (`C:/DOS/MM/`), and fits within
+loads game data from the same launch folder as `MM.APP`, and fits within
 HamsterOS's 16-color VGA display and RAM constraints.
 
 **Sibling repositories (always at these relative paths):**
@@ -34,8 +34,8 @@ event loop, VGA backbuffer rules, memory model).
 | CPU | 32-bit i386 protected mode; `-m32 -march=i386 -O2 -ffreestanding -fno-builtin` |
 | libc | **None.** No `printf`, no `malloc`/`free`, no `string.h`, no `stdio.h` |
 | Memory | ~600–700 KB heap free at idle on a 2 MB machine |
-| Floppy | 1.44 MB total; ~200 KB free → game data **must load from C: drive** |
-| Game data | `C:/DOS/MM/` on an HD-installed HamsterOS; that directory already exists after INSTALL.APP |
+| Floppy | 1.44 MB total; ~200 KB free → most game data must live beside `MM.APP`, not inside the OS image |
+| Game data | Same folder as `MM.APP` on any FAT drive/folder. The OS passes that launch folder through `open_launch_at(drive, cluster, name)` |
 | Event model | **Callback-driven**, not a polling loop. OS pushes events via `draw()`, `scancode()`, `ptr_down/up/move()`, `update()` |
 | State | All app state declared `static` in one file; BSS zeroed at load time |
 | Heap | `heap_alloc(size)` / `heap_free(ptr)` through HamsterHostAPI only |
@@ -136,7 +136,7 @@ in `update()`; rendering runs in `draw()`.
 |----------------|-------------|
 | `main.c` | `mm_port.c` + `mm_ext_entry.c` |
 | `audio.c / .h` | `speaker_note_on(hz)` + SB16 driver via stubs |
-| `embedded_data.c / .h` | Load from FAT (`C:/DOS/MM/`) |
+| `embedded_data.c / .h` | Load from FAT using the captured launch-folder asset base |
 | `sdl_compat.h / sdl_compat_win32.c` | Not needed |
 | `CMakeLists.txt`, `*.bat`, `resources.rc` | `Makefile` in this repo |
 
@@ -200,16 +200,16 @@ g_host->wnd_end_interaction(&g_frame);
 ### FAT filesystem
 
 ```c
-// Load a file from C:/DOS/MM/:
-// 1. Find the DOS/MM directory cluster (do once on open):
-uint32_t mm_dir = 0;
-fat_find_subdir_cluster(FAT_DRIVE_HOST, 0, "DOS", &mm_dir);       // get /DOS/
-fat_find_subdir_cluster(FAT_DRIVE_HOST, mm_dir, "MM", &mm_dir);   // get /DOS/MM/
+// Load a file from the MM.APP launch folder:
+// 1. Store drive/cluster in open_launch_at(drive, cluster, name).
+//    Cluster 0 is a valid root directory, so track "known" separately.
+FatDrive mm_drive = drive;
+uint32_t mm_dir = cluster;
 
 // 2. Load a file:
 uint8_t *buf = g_host->heap_alloc(max_size);
 uint32_t loaded = 0; bool trunc = false;
-bool ok = g_host->fat_load(FAT_DRIVE_HOST, mm_dir, "MAZEDATA.DTA",
+bool ok = g_host->fat_load(mm_drive, mm_dir, "MAZEDATA.DTA",
                              (char*)buf, max_size, &loaded, &trunc);
 if (!ok) { g_host->serial_str("MAZEDATA.DTA load failed\n"); }
 ```
@@ -347,7 +347,7 @@ The game belongs in `/GAMES/` on the floppy. Add it to
 7. Copy `font.c/.h` and `rle.c/.h` unchanged
 
 ### Phase 3: Game data loading
-8. Implement `mm_load_game_data()`: fat_load MAZEDATA.DTA from `C:/DOS/MM/`
+8. Implement `mm_load_game_data()`: fat_load MAZEDATA.DTA from the captured launch-folder asset base
 9. Copy `mazedata.c/.h` and `ovr.c/.h`; replace `fopen`/`fread` with fat_load buffer ops
 10. Display first map name on screen to confirm
 
@@ -403,8 +403,9 @@ continuous full-window repaint.
 moves — always call `wnd_display_bounds` to get current bounds before
 calling `present_region`. Never hardcode a position.
 
-**`FAT_DRIVE_HOST` = C: drive.** `FAT_DRIVE_BOOT` = A: (floppy).
-Game data is on C: in `DOS/MM/`.
+**No hardcoded game-data drive.** `FAT_DRIVE_BOOT` = A:, `FAT_DRIVE_B` = B:,
+and `FAT_DRIVE_HOST` = C:, but MM data loads from whichever drive/folder
+launched `MM.APP`.
 
 **Keep the .APP lean.** Code only — no embedded game data. Target
 < 80 KB so the floppy has room for the full games suite.
