@@ -103,6 +103,16 @@ static void sfx_play(const MusicNote *seq, int len) {
     g_sfx_seq = seq; g_sfx_len = len; g_sfx_idx = 0; g_sfx_next = pit_millis();
 }
 
+static bool mm_key_is_yes(uint8_t sc)
+{
+    return sc == 0x15 || sc == 'Y' || sc == 'y';
+}
+
+static bool mm_key_is_no(uint8_t sc)
+{
+    return sc == 0x31 || sc == 'N' || sc == 'n';
+}
+
 /* ---- Window (game_mode hides header bar, so window starts at y=0) ---- */
 #define WIN_X     0
 #define WIN_Y     0
@@ -2274,14 +2284,12 @@ bool mm_port_update(void){
         if (g_sfx_idx >= g_sfx_len) { g_sfx_seq=NULL; speaker_note_off(); g_mus_next=now; }
     } else if (g_music_en && g_mus_seq) {
         if (g_mus_next == 0) g_mus_next = now;
-        guard = 0;
-        while (now >= g_mus_next && g_mus_seq && guard++ < 8) {
+        if (now >= g_mus_next && g_mus_seq) {
             if (g_mus_idx >= g_mus_len) g_mus_idx = 0;
             const MusicNote *n = &g_mus_seq[g_mus_idx++];
             if (n->hz) speaker_note_on(n->hz); else speaker_note_off();
-            g_mus_next += n->ms ? n->ms : 1u;
+            g_mus_next = now + (n->ms ? n->ms : 1u);
         }
-        if (g_mus_seq && now >= g_mus_next) g_mus_next = now;
     }
     /* Auto-start music on title screen only */
     if (g_music_en && !g_mus_seq && g_mode==GM_TITLE)
@@ -3006,19 +3014,19 @@ bool mm_port_scancode(uint8_t sc){
 
     /* Quit confirmation */
     if(g_mode==GM_QUIT_CONFIRM){
-        if(sc==0x15||sc==0x59){ /* Y: yes (scancode Y or key y) */ mm_port_close(); return true; }
-        if(sc==0x31||sc==0x01){ /* N or ESC: no */
+        if(mm_key_is_yes(sc)){ /* Y: yes */ mm_port_close(); return true; }
+        if(mm_key_is_no(sc)||sc==0x01){ /* N or ESC: no */
             g_mode=g_prev_mode; g_needs_redraw=true; return true;
         }
         return true;
     }
 
     if(g_mode==GM_EXPLORE&&g_prompt_pending){
-        if(sc==0x15||sc==0x1C){
+        if(mm_key_is_yes(sc)||sc==0x1C){
             mm_clear_prompt();
             return mm_activate_current_tile();
         }
-        if(sc==0x31){
+        if(mm_key_is_no(sc)){
             mm_clear_prompt();
             player_set_message(&g_gs.player,"",0);
             g_needs_redraw=true;
@@ -3049,7 +3057,7 @@ bool mm_port_scancode(uint8_t sc){
     }
 
     /* Enter (0x1C) OR Y (0x15): activate tile */
-    if((sc==0x1C||sc==0x15)&&g_game_ready&&g_ovr_loaded){
+    if((sc==0x1C||mm_key_is_yes(sc))&&g_game_ready&&g_ovr_loaded){
         return mm_activate_current_tile();
     }
     if(sc==0x30&&g_game_ready){ /* B: bash */
